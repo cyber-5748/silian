@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+data/
+.pytest_cache/
+.coverage
+dist/
+*.egg-info/
+.claude/
+plan/
+.trae/
+logs/
