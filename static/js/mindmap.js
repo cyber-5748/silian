@@ -158,12 +158,6 @@ class MindmapRenderer {
         this.contextMenu = document.createElement('div');
         this.contextMenu.className = 'context-menu';
         this.contextMenu.innerHTML = `
-            <div class="context-menu-item" data-action="createBranch">
-                <svg viewBox="0 0 24 24" width="16" height="16">
-                    <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                </svg>
-                <span>从此处分叉对话</span>
-            </div>
             <div class="context-menu-item" data-action="viewDetails">
                 <svg viewBox="0 0 24 24" width="16" height="16">
                     <path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
@@ -223,9 +217,6 @@ class MindmapRenderer {
         const nodeId = this.contextMenuNodeId;
 
         switch (action) {
-            case 'createBranch':
-                await this.handleCreateBranch(nodeId);
-                break;
             case 'deleteBranch':
                 this.showDeleteBranchConfirm(nodeId);
                 break;
@@ -243,25 +234,6 @@ class MindmapRenderer {
                 }
                 break;
         }
-    }
-
-    handleCreateBranch(parentNodeId) {
-        // 分叉=选中该节点并聚焦聊天输入框,用户发送消息后自动形成分支
-        this.highlightNode(parentNodeId);
-        this.selectedNodeId = parentNodeId;
-        if (this.onNodeSelect) {
-            const nodeData = this.findNodeData(parentNodeId);
-            this.onNodeSelect({
-                nodeId: parentNodeId,
-                userMessage: nodeData?.userMessage || nodeData?.user_message || '',
-                aiReply: nodeData?.aiReply || nodeData?.ai_reply || '',
-                parentId: nodeData?.parentId || nodeData?.parent_id || null,
-                branchColor: nodeData?.branchColor || nodeData?.branch_color || ''
-            });
-        }
-        // 聚焦聊天输入框
-        const chatInput = document.getElementById('chatInput');
-        if (chatInput) chatInput.focus();
     }
 
     showDeleteBranchConfirm(branchNodeId) {
