@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.logger import get_logger
 from app.ai_models import model_manager, ChatMessage
 from app.context import context_manager, ContextConfig, CompressionStrategy
-from app.storage import get_session, save_session, get_node_path
+from app.storage import get_session, add_node, update_node, get_node_path
 
 logger = get_logger("chat")
 
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/chat", tags=["对话消息"])
 class SendMessageRequest(BaseModel):
     content: str
     session_id: str
-    parent_node_id: Optional[str] = None
+    parent_node_id: str = "root"
     model_id: Optional[str] = None
     temperature: float = 0.7
     max_tokens: Optional[int] = None
@@ -55,16 +55,16 @@ async def generate_stream_response(
     max_tokens: Optional[int],
     session_id: str,
     user_content: str,
-    parent_node_id: Optional[str],
+    parent_node_id: str,
 ) -> AsyncGenerator[str, None]:
     full_content = ""
     node_id = None
-    
+
     try:
         model = model_manager.get_model(model_id)
-        
+
         yield f"data: {json.dumps({'type': 'start', 'content': ''}, ensure_ascii=False)}\n\n"
-        
+
         async for chunk in model.chat_stream(
             messages=messages,
             temperature=temperature,
@@ -72,16 +72,20 @@ async def generate_stream_response(
         ):
             full_content += chunk
             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
-        
-        node_id = save_ai_response_to_session(
+
+        # AI回复完成后，使用 add_node 创建新节点
+        new_node = add_node(
             session_id=session_id,
-            user_content=user_content,
-            ai_content=full_content,
-            parent_node_id=parent_node_id,
+            node_data={
+                "parent_id": parent_node_id,
+                "user_message": user_content,
+                "ai_reply": full_content,
+            },
         )
-        
-        yield f"data: {json.dumps({'type': 'done', 'content': full_content, 'node_id': node_id}, ensure_ascii=False)}\n\n"
-        
+        node_id = new_node["id"] if new_node else None
+
+        yield f"data: {json.dumps({'type': 'done', 'content': full_content, 'node_id': node_id, 'parent_id': parent_node_id}, ensure_ascii=False)}\n\n"
+
     except ValueError as e:
         yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
     except Exception as e:
@@ -92,74 +96,41 @@ def save_ai_response_to_session(
     session_id: str,
     user_content: str,
     ai_content: str,
-    parent_node_id: Optional[str] = None,
-) -> str:
-    import uuid
-    from datetime import datetime
-    
-    session = get_session(session_id)
-    if not session:
-        return ""
-    
-    node_id = str(uuid.uuid4())
-    timestamp = datetime.now().isoformat()
-    
-    if "conversation_tree" not in session:
-        session["conversation_tree"] = {
-            "nodes": {},
-            "root_id": None,
-        }
-    
-    if "messages" not in session:
-        session["messages"] = []
-    
-    session["messages"].extend([
-        {"role": "user", "content": user_content, "timestamp": timestamp, "node_id": node_id},
-        {"role": "assistant", "content": ai_content, "timestamp": timestamp, "node_id": node_id},
-    ])
-    
-    node_data = {
-        "id": node_id,
-        "user_message": user_content,
-        "ai_reply": ai_content,
-        "timestamp": timestamp,
-        "parent_id": parent_node_id,
-        "children": [],
-    }
-    
-    session["conversation_tree"]["nodes"][node_id] = node_data
-    
-    if parent_node_id and parent_node_id in session["conversation_tree"]["nodes"]:
-        session["conversation_tree"]["nodes"][parent_node_id]["children"].append(node_id)
-    elif session["conversation_tree"]["root_id"] is None:
-        session["conversation_tree"]["root_id"] = node_id
-    
-    save_session(session_id, session)
-    
-    return node_id
+    parent_node_id: str = "root",
+) -> Optional[str]:
+    """使用 add_node 创建节点，替代直接操作 session["messages"]。"""
+    new_node = add_node(
+        session_id=session_id,
+        node_data={
+            "parent_id": parent_node_id,
+            "user_message": user_content,
+            "ai_reply": ai_content,
+        },
+    )
+    if new_node:
+        return new_node["id"]
+    return None
 
 
 def build_context_for_chat(
     session_id: str,
     current_message: str,
-    parent_node_id: Optional[str] = None,
+    parent_node_id: str = "root",
 ) -> List[ChatMessage]:
-    session = get_session(session_id)
-    messages: List[ChatMessage] = []
-    
-    if session and session.get("messages"):
-        context_messages = []
-        for msg in session["messages"][-10:]:
-            context_messages.append({
-                "role": msg["role"],
-                "content": msg["content"],
-            })
-        
-        for msg in context_messages:
-            messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
-    
+    """使用 context_manager.build_context_from_node 沿 parent 链回溯构建上下文。"""
+    # 构建上下文：从根到 parent_node_id 的路径
+    context_messages = context_manager.build_context_from_node(
+        session_id=session_id,
+        node_id=parent_node_id,
+        include_current=True,
+    )
+
+    # 转换为 ChatMessage 列表
+    messages = context_manager.to_chat_messages(context_messages)
+
+    # 添加当前用户消息
     messages.append(ChatMessage(role="user", content=current_message))
-    
+
     return messages
 
 
@@ -167,19 +138,26 @@ def build_context_for_chat(
 async def send_message(request: SendMessageRequest):
     if not request.content.strip():
         raise HTTPException(status_code=400, detail="消息内容不能为空")
-    
+
     session = get_session(request.session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"会话不存在: {request.session_id}")
-    
-    logger.info("发送消息: session_id=%s", request.session_id)
-    
+
+    # 验证 parent_node_id 对应的节点存在
+    nodes = session.get("nodes", [])
+    if request.parent_node_id != "root":
+        node_exists = any(n["id"] == request.parent_node_id for n in nodes)
+        if not node_exists:
+            raise HTTPException(status_code=400, detail=f"父节点不存在: {request.parent_node_id}")
+
+    logger.info("发送消息: session_id=%s, parent_node_id=%s", request.session_id, request.parent_node_id)
+
     messages = build_context_for_chat(
         session_id=request.session_id,
         current_message=request.content,
         parent_node_id=request.parent_node_id,
     )
-    
+
     if request.stream:
         return StreamingResponse(
             generate_stream_response(
@@ -207,22 +185,23 @@ async def send_message(request: SendMessageRequest):
                 max_tokens=request.max_tokens,
                 stream=False,
             )
-            
+
             node_id = save_ai_response_to_session(
                 session_id=request.session_id,
                 user_content=request.content,
                 ai_content=response.content,
                 parent_node_id=request.parent_node_id,
             )
-            
+
             return {
                 "role": "assistant",
                 "content": response.content,
                 "node_id": node_id,
+                "parent_id": request.parent_node_id,
                 "model": response.model,
                 "provider": response.provider,
             }
-            
+
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
@@ -240,12 +219,12 @@ async def get_chat_history(session_id: str, limit: int = 50, offset: int = 0):
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
-    
+
     messages = session.get("messages", [])
     total = len(messages)
-    
+
     paginated_messages = messages[offset:offset + limit]
-    
+
     return ChatHistoryResponse(
         session_id=session_id,
         messages=[
@@ -270,7 +249,7 @@ async def build_context(
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
-    
+
     try:
         strategy = CompressionStrategy(compression_strategy)
     except ValueError:
@@ -278,12 +257,12 @@ async def build_context(
             status_code=400,
             detail=f"不支持的压缩策略: {compression_strategy}"
         )
-    
+
     config = ContextConfig(
         max_tokens=max_tokens,
         compression_strategy=strategy,
     )
-    
+
     if node_id:
         result = context_manager.build_and_compress_context(
             session_id=session_id,
@@ -300,11 +279,11 @@ async def build_context(
                 timestamp=msg.get("timestamp"),
                 node_id=msg.get("node_id"),
             ))
-        
+
         compressed_messages, was_compressed, used_strategy = context_manager.compress_context(
             messages, strategy
         )
-        
+
         from app.context import ContextBuildResult
         result = ContextBuildResult(
             messages=compressed_messages,
@@ -314,7 +293,7 @@ async def build_context(
             compression_ratio=context_manager.count_messages_tokens(compressed_messages) / context_manager.count_messages_tokens(messages) if was_compressed and messages else None,
             strategy_used=used_strategy if was_compressed else None,
         )
-    
+
     return {
         "messages": [
             {
@@ -337,9 +316,9 @@ async def get_context_stats(session_id: str):
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
-    
+
     from app.context import ContextMessage
-    
+
     messages = []
     for msg in session.get("messages", []):
         messages.append(ContextMessage(
@@ -348,9 +327,9 @@ async def get_context_stats(session_id: str):
             timestamp=msg.get("timestamp"),
             node_id=msg.get("node_id"),
         ))
-    
+
     stats = context_manager.get_context_stats(messages)
-    
+
     return stats
 
 
@@ -366,25 +345,30 @@ async def regenerate_response(
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
-    
-    tree = session.get("conversation_tree", {})
-    nodes = tree.get("nodes", {})
-    
-    if node_id not in nodes:
+
+    # 在 nodes 列表中查找节点
+    nodes = session.get("nodes", [])
+    target_node = None
+    for n in nodes:
+        if n["id"] == node_id:
+            target_node = n
+            break
+
+    if not target_node:
         raise HTTPException(status_code=404, detail=f"节点不存在: {node_id}")
-    
-    node = nodes[node_id]
-    user_content = node.get("user_message")
-    
+
+    user_content = target_node.get("user_message")
     if not user_content:
         raise HTTPException(status_code=400, detail="该节点没有用户消息")
-    
+
+    parent_id = target_node.get("parent_id", "root")
+
     messages = build_context_for_chat(
         session_id=session_id,
         current_message=user_content,
-        parent_node_id=node.get("parent_id"),
+        parent_node_id=parent_id,
     )
-    
+
     if stream:
         return StreamingResponse(
             generate_stream_response(
@@ -394,7 +378,7 @@ async def regenerate_response(
                 max_tokens=max_tokens,
                 session_id=session_id,
                 user_content=user_content,
-                parent_node_id=node.get("parent_id"),
+                parent_node_id=parent_id,
             ),
             media_type="text/event-stream",
             headers={
@@ -412,25 +396,23 @@ async def regenerate_response(
                 max_tokens=max_tokens,
                 stream=False,
             )
-            
-            node["ai_reply"] = response.content
-            save_session(session_id, session)
-            
-            for i, msg in enumerate(session.get("messages", [])):
-                if msg.get("node_id") == node_id and msg["role"] == "assistant":
-                    session["messages"][i]["content"] = response.content
-                    break
-            
-            save_session(session_id, session)
-            
+
+            # 更新现有节点的 ai_reply
+            update_node(
+                session_id=session_id,
+                node_id=node_id,
+                updates={"ai_reply": response.content},
+            )
+
             return {
                 "role": "assistant",
                 "content": response.content,
                 "node_id": node_id,
+                "parent_id": parent_id,
                 "model": response.model,
                 "provider": response.provider,
             }
-            
+
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:

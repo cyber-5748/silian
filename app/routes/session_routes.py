@@ -15,11 +15,15 @@ from app.storage import (
     create_session as storage_create_session,
     update_session as storage_update_session,
     delete_session as storage_delete_session,
+    delete_node as storage_delete_node,
     save_session as storage_save_session,
     read_sessions,
     write_sessions,
     backup_sessions,
+    get_session_tree as storage_get_session_tree,
+    get_node_context_path as storage_get_node_context_path,
 )
+from app.context import context_manager
 
 logger = get_logger("session")
 
@@ -141,6 +145,80 @@ async def create_backup():
         }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{session_id}/tree")
+async def get_session_tree_api(session_id: str):
+    """返回完整对话树结构"""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
+
+    tree = storage_get_session_tree(session_id)
+    if tree is None:
+        raise HTTPException(status_code=404, detail="对话树为空")
+
+    return tree
+
+
+@router.get("/{session_id}/nodes/{node_id}/context")
+async def get_node_context_api(session_id: str, node_id: str):
+    """返回从根节点到指定节点的上下文路径"""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
+
+    context_path = storage_get_node_context_path(session_id, node_id)
+    if not context_path:
+        raise HTTPException(status_code=404, detail=f"节点不存在: {node_id}")
+
+    # 同时使用 context_manager 构建完整的上下文消息
+    context_messages = context_manager.build_context_from_node(
+        session_id=session_id,
+        node_id=node_id,
+        include_current=True,
+    )
+
+    return {
+        "node_id": node_id,
+        "path": [
+            {
+                "id": n.get("id"),
+                "parent_id": n.get("parent_id"),
+                "user_message": n.get("user_message", ""),
+                "ai_reply": n.get("ai_reply", ""),
+                "branch_color": n.get("branch_color", ""),
+                "timestamp": n.get("timestamp", ""),
+            }
+            for n in context_path
+        ],
+        "context_messages": [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "node_id": msg.node_id,
+            }
+            for msg in context_messages
+        ],
+    }
+
+
+@router.delete("/{session_id}/nodes/{node_id}")
+async def delete_node_api(session_id: str, node_id: str, cascade: bool = True):
+    """删除节点及其子节点"""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
+
+    if node_id == "root":
+        raise HTTPException(status_code=400, detail="不能删除根节点")
+
+    success = storage_delete_node(session_id, node_id, cascade=cascade)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"节点不存在: {node_id}")
+
+    logger.info("删除节点: session_id=%s, node_id=%s", session_id, node_id)
+    return {"success": True, "message": "节点已删除"}
 
 
 @router.get("/{session_id}")

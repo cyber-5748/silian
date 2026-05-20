@@ -180,6 +180,8 @@ body {
     overflow: hidden;
 }
 
+/* ==================== Flowchart Styles ==================== */
+
 #mindmapCanvas {
     width: 100%;
     height: 100%;
@@ -190,230 +192,61 @@ body {
 #mindmapCanvas svg {
     width: 100%;
     height: 100%;
+    display: block;
 }
 
-.mind-elixir-node {
+.flowchart-main-group {
+    transition: none;
+}
+
+.flowchart-node-group {
     cursor: pointer;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    transition: opacity 150ms ease;
 }
 
-.mind-elixir-node:hover {
-    transform: translateY(-2px);
+.flowchart-node-group:hover {
+    opacity: 0.9;
 }
 
-.mind-elixir-node.selected {
-    transform: translateY(-2px);
-    box-shadow: 0 0 0 3px var(--primary-color), 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+.flowchart-node-group:hover .flowchart-dialogue-rect {
+    stroke: var(--primary-color);
+    stroke-width: 1.5;
 }
 
-.mind-elixir-node.custom-node {
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-md);
+.flowchart-node-group.selected .flowchart-dialogue-rect {
+    stroke-width: 2.5;
 }
 
-.mind-elixir-node.root-node {
-    background: linear-gradient(135deg, var(--primary-color), #8b5cf6);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    padding: 14px 24px;
-}
-
-.mind-elixir-node.root-node .mind-elixir-topic {
-    color: white;
-    font-weight: 600;
-    font-size: 16px;
-}
-
-.mind-elixir-node.user-node {
-    background-color: #e0f2fe;
-    border-radius: 12px;
-    border-left: 4px solid #3b82f6;
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
-}
-
-.mind-elixir-node.assistant-node {
-    background-color: #d1fae5;
-    border-radius: 12px;
-    border-left: 4px solid #10b981;
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
-}
-
-[data-theme="dark"] .mind-elixir-node.user-node {
-    background-color: #1e3a5f;
-    border-left-color: #3b82f6;
-}
-
-[data-theme="dark"] .mind-elixir-node.assistant-node {
-    background-color: #134e4a;
-    border-left-color: #10b981;
-}
-
-.mind-elixir-node.branch-node {
-    background-color: var(--surface-color);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-md);
-}
-
-.mind-elixir-node.sub-node {
-    background-color: var(--surface-color);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-sm);
-}
-
-.mind-elixir-topic {
-    font-family: var(--font-family);
-    font-size: 14px;
-    color: var(--text-primary);
-    word-wrap: break-word;
-    max-width: 220px;
-    line-height: 1.4;
-}
-
-.mind-elixir-topic.node-topic {
-    padding: 4px 8px;
-}
-
-.node-custom-content {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 120px;
-    max-width: 200px;
-}
-
-.node-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.node-role-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.node-role-icon.user {
-    background-color: #3b82f6;
-    color: white;
-}
-
-.node-role-icon.assistant {
-    background-color: #10b981;
-    color: white;
-}
-
-.node-role-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    opacity: 0.8;
-}
-
-.user-node .node-role-label {
-    color: #1e40af;
-}
-
-.assistant-node .node-role-label {
-    color: #065f46;
-}
-
-[data-theme="dark"] .user-node .node-role-label {
-    color: #93c5fd;
-}
-
-[data-theme="dark"] .assistant-node .node-role-label {
-    color: #6ee7b7;
-}
-
-.node-summary {
-    font-size: 13px;
-    color: var(--text-primary);
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-}
-
-.mind-elixir-children {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.mind-elixir-parent {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
-.mindmap-tree {
-    padding: 40px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-}
-
-.mind-node-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.mind-children {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-left: 20px;
-    border-left: 2px solid var(--border-color);
-    margin-left: 10px;
-}
-
-path[class*="mind-elixir"] {
-    stroke: var(--border-color);
+.flowchart-node-group.selected .flowchart-root-rect {
+    stroke: #ffffff;
     stroke-width: 2;
-    fill: none;
-    transition: stroke var(--transition-fast);
+    stroke-opacity: 0.5;
 }
 
-.mind-elixir-expander {
-    cursor: pointer;
-    transition: transform var(--transition-fast), background-color var(--transition-fast);
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background-color: var(--surface-color);
-    border: 2px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    font-weight: bold;
-    color: var(--text-secondary);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+.flowchart-connection {
+    transition: stroke 150ms ease, stroke-width 150ms ease;
 }
 
-.mind-elixir-expander:hover {
-    transform: scale(1.2);
-    background-color: var(--primary-color);
-    border-color: var(--primary-color);
-    color: white;
+.flowchart-root-rect {
+    transition: filter 150ms ease;
 }
 
-.mind-elixir-expander.expanded {
-    background-color: var(--primary-color);
-    border-color: var(--primary-color);
-    color: white;
+.flowchart-dialogue-rect {
+    transition: stroke 150ms ease, stroke-width 150ms ease, filter 150ms ease;
+}
+
+/* Dark mode flowchart overrides */
+[data-theme="dark"] .flowchart-dialogue-rect {
+    fill: #1e293b;
+    stroke: #334155;
+}
+
+[data-theme="dark"] .flowchart-node-group:hover .flowchart-dialogue-rect {
+    stroke: var(--primary-color);
+}
+
+[data-theme="dark"] .flowchart-connection {
+    opacity: 0.8;
 }
 
 .mindmap-controls {
@@ -811,19 +644,7 @@ path[class*="mind-elixir"] {
     max-height: 400px;
 }
 
-[data-theme="dark"] .mind-elixir-node.branch-node,
-[data-theme="dark"] .mind-elixir-node.sub-node {
-    background-color: var(--surface-color);
-    border-color: var(--border-color);
-}
-
-[data-theme="dark"] .mind-elixir-topic {
-    color: var(--text-primary);
-}
-
-[data-theme="dark"] path[class*="mind-elixir"] {
-    stroke: var(--border-color);
-}
+/* Dark mode node detail overrides */
 
 ::-webkit-scrollbar {
     width: 8px;
@@ -1143,59 +964,6 @@ path[class*="mind-elixir"] {
     border-radius: 5px 0 0 5px;
 }
 
-.branch-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    background-color: var(--branch-color, var(--primary-color));
-    color: white;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: 600;
-    margin-right: 8px;
-}
-
-.branch-color-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 6px;
-}
-
-.branch-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-sm);
-}
-
-.branch-list-item {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-sm) var(--spacing-md);
-    background-color: var(--background-color);
-    border-radius: var(--radius-md);
-    border-left: 4px solid var(--branch-color, var(--primary-color));
-}
-
-.branch-list-item-name {
-    flex: 1;
-    font-size: 0.875rem;
-    font-weight: 500;
-}
-
-.branch-list-item-actions {
-    display: flex;
-    gap: var(--spacing-xs);
-}
-
-.branch-list-item-actions .btn-icon {
-    width: 28px;
-    height: 28px;
-}
-
 #createBranchBtn {
     position: relative;
 }
@@ -1210,23 +978,6 @@ path[class*="mind-elixir"] {
     background-color: #10b981;
     border-radius: 50%;
     border: 1px solid var(--surface-color);
-}
-
-.mind-elixir-node.branch-node {
-    position: relative;
-}
-
-.mind-elixir-node.branch-node .branch-badge {
-    position: absolute;
-    top: -8px;
-    right: -8px;
-    background-color: var(--branch-color, var(--primary-color));
-    color: white;
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-weight: 600;
-    white-space: nowrap;
 }
 
 .confirm-dialog {

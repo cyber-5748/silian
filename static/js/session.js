@@ -70,7 +70,6 @@ class SessionManager {
                                     await api.updateSession(newId, {
                                         title: localSession.title,
                                         messages: localSession.messages,
-                                        mindmap: localSession.mindmap,
                                     });
                                 } catch (e) {
                                     console.warn('同步会话数据到后端失败:', e);
@@ -122,13 +121,6 @@ class SessionManager {
             createdAt: backendSession.created_at,
             updatedAt: backendSession.updated_at,
             messages: backendSession.messages || [],
-            mindmap: backendSession.mindmap || {
-                root: {
-                    id: 'root',
-                    content: backendSession.name || '未命名会话',
-                    children: []
-                }
-            },
             nodes: backendSession.nodes || [],
             conversation_tree: backendSession.conversation_tree || null,
         };
@@ -196,14 +188,7 @@ class SessionManager {
             title,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            messages: [],
-            mindmap: {
-                root: {
-                    id: 'root',
-                    content: title,
-                    children: []
-                }
-            }
+            messages: []
         };
         this.sessions.unshift(session);
         this.currentSessionId = session.id;
@@ -294,10 +279,6 @@ class SessionManager {
         }
     }
 
-    updateMindmap(sessionId, mindmap) {
-        return this.updateSession(sessionId, { mindmap });
-    }
-
     deleteSession(sessionId) {
         const index = this.sessions.findIndex(s => s.id === sessionId);
         if (index !== -1) {
@@ -340,7 +321,6 @@ class SessionManager {
             data: {
                 title: session.title,
                 messages: session.messages,
-                mindmap: session.mindmap,
             }
         };
 

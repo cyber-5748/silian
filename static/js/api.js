@@ -32,19 +32,20 @@ class APIModule {
         }
     }
 
-    async sendMessage(content, sessionId, options = {}) {
+    async sendMessage(content, sessionId, parentNodeId = 'root', options = {}) {
         return this.request('/chat/send', {
             method: 'POST',
             body: {
                 content,
                 session_id: sessionId,
+                parent_node_id: parentNodeId,
                 stream: false,
                 ...options
             }
         });
     }
 
-    async *streamMessage(content, sessionId, options = {}) {
+    async *streamMessage(content, sessionId, parentNodeId = 'root', options = {}) {
         const url = `${this.baseUrl}/chat/send`;
         const response = await fetch(url, {
             method: 'POST',
@@ -54,6 +55,7 @@ class APIModule {
             body: JSON.stringify({
                 content,
                 session_id: sessionId,
+                parent_node_id: parentNodeId,
                 stream: true,
                 ...options
             })
@@ -214,6 +216,10 @@ class APIModule {
 
     async getMindmap(sessionId) {
         return this.request(`/sessions/${sessionId}/mindmap`);
+    }
+
+    async getSessionTree(sessionId) {
+        return this.request(`/sessions/${sessionId}/tree`);
     }
 
     async updateMindmap(sessionId, mindmapData) {

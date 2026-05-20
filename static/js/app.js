@@ -8,6 +8,8 @@ class App {
         this.mindmapRenderer = null;
         this.chatModule = null;
         this.currentSession = null;
+        this.activeNodeId = 'root';
+        this.nodeConversationMap = new Map();
     }
 
     init() {
@@ -45,34 +47,22 @@ class App {
         const container = document.getElementById('mindmapContainer');
         this.mindmapRenderer = new MindmapRenderer(container);
 
-        this.mindmapRenderer.setOnNodeSelect((messageInfo) => {
-            this.highlightChatMessage(messageInfo);
-        });
+        this.mindmapRenderer.setOnNodeSelect((info) => this.handleNodeSelect(info));
 
         container.addEventListener('mindmap:nodeClick', (e) => {
             console.log('节点点击:', e.detail);
         });
     }
 
-    highlightChatMessage(messageInfo) {
-        if (messageInfo.nodeId) {
-            this.chatModule.highlightMessage(messageInfo.nodeId);
-            return;
-        }
+    handleNodeSelect(info) {
+        const nodeId = this.mindmapRenderer.selectedNodeId || 'root';
+        this.activeNodeId = nodeId;
+        this.chatModule.setActiveNodeId(nodeId);
 
-        const chatMessages = document.getElementById('chatMessages');
-        const messages = chatMessages.querySelectorAll('.message');
-
-        messages.forEach(msg => {
-            msg.classList.remove('highlighted');
-        });
-
-        messages.forEach(msg => {
-            const contentEl = msg.querySelector('.message-content p');
-            if (contentEl && contentEl.textContent === messageInfo.fullContent) {
-                msg.classList.add('highlighted');
-                msg.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+        const conversation = this.nodeConversationMap.get(nodeId);
+        this.chatModule.showNodeConversation({
+            userMessage: conversation ? conversation.userMessage : (info.fullContent || ''),
+            aiReply: conversation ? conversation.aiReply : ''
         });
     }
 
@@ -309,113 +299,96 @@ class App {
         }
     }
 
-    loadSession(session) {
+    async loadSession(session) {
         const sessionChanged = !this.currentSession || this.currentSession.id !== session.id;
         this.currentSession = session;
 
         if (session.id) {
             this.mindmapRenderer.setSessionId(session.id);
             this.chatModule.setSessionId(session.id);
+            this.chatModule.setActiveNodeId('root');
+            this.activeNodeId = 'root';
         }
 
         if (sessionChanged) {
-            if (session.messages && session.messages.length > 0) {
-                this.chatModule.loadMessages(session.messages);
-            } else {
-                this.chatModule.clear();
-            }
+            this.chatModule.clear();
 
-            if (session.mindmap) {
-                this.mindmapRenderer.render(session.mindmap);
+            if (session.id && !session.id.startsWith('session_')) {
+                try {
+                    const treeData = await api.getSessionTree(session.id);
+                    this.mindmapRenderer.render(this.convertTreeData(treeData));
+                } catch (e) {
+                    this.mindmapRenderer.clear();
+                }
             } else {
-                this.mindmapRenderer.render({
-                    root: {
-                        id: 'root',
-                        content: session.title || session.name || '对话主题',
-                        children: []
-                    }
-                });
+                this.mindmapRenderer.clear();
             }
         }
     }
 
     handleUserMessage(data) {
-        const session = sessionManager.getCurrentSession();
-        if (!session) return;
-
-        sessionManager.addMessage(session.id, {
-            role: 'user',
-            content: data.content
-        });
+        // 用户消息已通过流式API发送到后端，无需额外处理
     }
 
     handleAIResponse(data) {
         const session = sessionManager.getCurrentSession();
         if (!session) return;
 
-        sessionManager.addMessage(session.id, {
-            role: 'assistant',
-            content: data.content,
-            node_id: data.nodeId
+        api.getSessionTree(session.id).then(treeData => {
+            this.mindmapRenderer.render(this.convertTreeData(treeData));
+            if (data.nodeId) {
+                this.activeNodeId = data.nodeId;
+                this.chatModule.setActiveNodeId(data.nodeId);
+            }
+        }).catch(e => {
+            console.error('重新加载思维导图失败:', e);
         });
-
-        this.updateMindmapFromMessages();
     }
 
     handleError(data) {
         console.error('聊天错误:', data.message);
     }
 
-    updateMindmapFromMessages() {
-        const session = sessionManager.getCurrentSession();
-        if (!session || !session.messages) return;
+    convertTreeData(treeData) {
+        if (!treeData) return null;
 
-        const messages = session.messages;
-        const rootContent = session.title || '对话主题';
+        this.nodeConversationMap.clear();
 
-        const userNodes = messages
-            .filter(m => m.role === 'user')
-            .slice(-5)
-            .map((m, i) => ({
-                id: m.node_id || `user_${i}_${Date.now()}`,
-                content: m.content.slice(0, 30),
-                fullContent: m.content,
-                role: 'user',
-                children: []
-            }));
-
-        const aiNodes = messages
-            .filter(m => m.role === 'assistant')
-            .slice(-5)
-            .map((m, i) => ({
-                id: m.node_id || `ai_${i}_${Date.now()}`,
-                content: m.content.slice(0, 30),
-                fullContent: m.content,
-                role: 'assistant',
-                children: []
-            }));
-
-        const mindmap = {
-            root: {
-                id: 'root',
-                content: rootContent,
-                children: [
-                    {
-                        id: 'user_branch',
-                        content: '用户问题',
-                        children: userNodes
-                    },
-                    {
-                        id: 'ai_branch',
-                        content: 'AI回复',
-                        children: aiNodes
-                    }
-                ]
+        const convertNode = (node) => {
+            if (node.user_message || node.ai_reply) {
+                this.nodeConversationMap.set(node.id, {
+                    userMessage: node.user_message || '',
+                    aiReply: node.ai_reply || ''
+                });
             }
+
+            const result = {
+                id: node.id,
+                content: node.ai_reply
+                    ? (node.ai_reply.length > 30 ? node.ai_reply.slice(0, 30) + '...' : node.ai_reply)
+                    : (node.user_message
+                        ? (node.user_message.length > 30 ? node.user_message.slice(0, 30) + '...' : node.user_message)
+                        : '根节点'),
+                fullContent: node.ai_reply || node.user_message || '',
+                role: node.ai_reply ? 'assistant' : (node.user_message ? 'user' : null),
+                timestamp: node.timestamp,
+                children: []
+            };
+
+            if (node.branch_color) {
+                result.branchColor = node.branch_color;
+                result.isBranch = true;
+                result.branch_name = node.user_message || '分支';
+            }
+
+            if (node.children && node.children.length > 0) {
+                result.children = node.children.map(child => convertNode(child));
+            }
+
+            return result;
         };
 
-        sessionManager.updateMindmap(session.id, mindmap);
-        this.mindmapRenderer.render(mindmap);
+        return { root: convertNode(treeData) };
     }
 
     formatDate(dateString) {

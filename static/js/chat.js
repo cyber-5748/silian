@@ -9,13 +9,14 @@ class ChatModule {
         this.isProcessing = false;
         this.listeners = new Set();
         this.currentSessionId = null;
+        this.activeNodeId = 'root';
         this.typewriterQueue = [];
         this.isTypewriting = false;
         this.typewriterSpeed = 20;
         this.currentAIMessage = null;
         this.currentAIMessageContent = '';
         this.abortController = null;
-        
+
         this.init();
     }
 
@@ -46,6 +47,10 @@ class ChatModule {
         this.currentSessionId = sessionId;
     }
 
+    setActiveNodeId(nodeId) {
+        this.activeNodeId = nodeId || 'root';
+    }
+
     async handleSend() {
         const content = this.input.value.trim();
         if (!content || this.isProcessing) return;
@@ -69,7 +74,7 @@ class ChatModule {
         try {
             this.abortController = new AbortController();
             
-            const streamGenerator = api.streamMessage(content, this.currentSessionId);
+            const streamGenerator = api.streamMessage(content, this.currentSessionId, this.activeNodeId);
             
             for await (const chunk of streamGenerator) {
                 if (chunk.type === 'start') {
@@ -259,6 +264,26 @@ class ChatModule {
                 </div>
             </div>
         `;
+    }
+
+    showNodeConversation(data) {
+        this.messagesContainer.innerHTML = '';
+
+        if (data.userMessage) {
+            this.addMessage({
+                role: 'user',
+                content: data.userMessage
+            });
+        }
+
+        if (data.aiReply) {
+            this.addMessage({
+                role: 'assistant',
+                content: data.aiReply
+            });
+        }
+
+        this.scrollToBottom();
     }
 
     loadMessages(messages) {

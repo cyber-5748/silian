@@ -9,37 +9,150 @@ const BRANCH_COLORS = [
     '#84cc16'
 ];
 
-const USER_COLOR = '#3b82f6';
-const ASSISTANT_COLOR = '#10b981';
+const NODE_WIDTH = 240;
+const NODE_MIN_HEIGHT = 60;
+const NODE_MAX_HEIGHT = 80;
+const LEVEL_HEIGHT = 100;
+const NODE_GAP = 40;
+const NODE_RADIUS = 12;
+const ROOT_RADIUS = 16;
 
 class MindmapRenderer {
     constructor(container) {
         this.container = container;
         this.canvas = container.querySelector('#mindmapCanvas');
-        this.mindElixir = null;
         this.currentData = null;
-        this.nodeMessages = new Map();
-        this.colorIndex = 0;
         this.selectedNodeId = null;
         this.onNodeSelect = null;
         this.currentSessionId = null;
-        this.branchColors = new Map();
         this.contextMenu = null;
         this.onBranchCreated = null;
         this.onBranchDeleted = null;
-        
+
+        // SVG state
+        this.svg = null;
+        this.mainGroup = null;
+        this.scale = 1;
+        this.panX = 0;
+        this.panY = 0;
+        this.isPanning = false;
+        this.panStartX = 0;
+        this.panStartY = 0;
+        this.panStartPanX = 0;
+        this.panStartPanY = 0;
+
+        // Layout data
+        this.nodePositions = new Map();
+        this.nodeDataMap = new Map();
+        this.colorIndex = 0;
+        this.rootId = 'root';
+
         this.init();
     }
 
     init() {
-        this.initMindElixir();
+        this.createSVG();
         this.initNodeDetailModal();
         this.initContextMenu();
+        this.initPanAndZoom();
     }
 
     setSessionId(sessionId) {
         this.currentSessionId = sessionId;
     }
+
+    // ==================== SVG Creation ====================
+
+    createSVG() {
+        const svgNS = 'http://www.w3.org/2000/svg';
+        this.svg = document.createElementNS(svgNS, 'svg');
+        this.svg.setAttribute('width', '100%');
+        this.svg.setAttribute('height', '100%');
+        this.svg.style.overflow = 'visible';
+
+        // Defs for gradients, filters, markers
+        const defs = document.createElementNS(svgNS, 'defs');
+
+        // Root node gradient
+        const rootGradient = document.createElementNS(svgNS, 'linearGradient');
+        rootGradient.setAttribute('id', 'rootGradient');
+        rootGradient.setAttribute('x1', '0%');
+        rootGradient.setAttribute('y1', '0%');
+        rootGradient.setAttribute('x2', '100%');
+        rootGradient.setAttribute('y2', '100%');
+        const stop1 = document.createElementNS(svgNS, 'stop');
+        stop1.setAttribute('offset', '0%');
+        stop1.setAttribute('stop-color', '#6366f1');
+        const stop2 = document.createElementNS(svgNS, 'stop');
+        stop2.setAttribute('offset', '100%');
+        stop2.setAttribute('stop-color', '#8b5cf6');
+        rootGradient.appendChild(stop1);
+        rootGradient.appendChild(stop2);
+        defs.appendChild(rootGradient);
+
+        // Shadow filter
+        const shadowFilter = document.createElementNS(svgNS, 'filter');
+        shadowFilter.setAttribute('id', 'nodeShadow');
+        shadowFilter.setAttribute('x', '-10%');
+        shadowFilter.setAttribute('y', '-10%');
+        shadowFilter.setAttribute('width', '130%');
+        shadowFilter.setAttribute('height', '140%');
+        const feOffset = document.createElementNS(svgNS, 'feOffset');
+        feOffset.setAttribute('result', 'offOut');
+        feOffset.setAttribute('in', 'SourceAlpha');
+        feOffset.setAttribute('dx', '0');
+        feOffset.setAttribute('dy', '2');
+        const feGaussian = document.createElementNS(svgNS, 'feGaussianBlur');
+        feGaussian.setAttribute('result', 'blurOut');
+        feGaussian.setAttribute('in', 'offOut');
+        feGaussian.setAttribute('stdDeviation', '3');
+        const feBlend = document.createElementNS(svgNS, 'feBlend');
+        feBlend.setAttribute('in', 'SourceGraphic');
+        feBlend.setAttribute('in2', 'blurOut');
+        feBlend.setAttribute('mode', 'normal');
+        shadowFilter.appendChild(feOffset);
+        shadowFilter.appendChild(feGaussian);
+        shadowFilter.appendChild(feBlend);
+        defs.appendChild(shadowFilter);
+
+        // Selected node shadow
+        const selectedShadow = document.createElementNS(svgNS, 'filter');
+        selectedShadow.setAttribute('id', 'selectedShadow');
+        selectedShadow.setAttribute('x', '-15%');
+        selectedShadow.setAttribute('y', '-15%');
+        selectedShadow.setAttribute('width', '140%');
+        selectedShadow.setAttribute('height', '150%');
+        const feOffset2 = document.createElementNS(svgNS, 'feOffset');
+        feOffset2.setAttribute('result', 'offOut');
+        feOffset2.setAttribute('in', 'SourceAlpha');
+        feOffset2.setAttribute('dx', '0');
+        feOffset2.setAttribute('dy', '3');
+        const feGaussian2 = document.createElementNS(svgNS, 'feGaussianBlur');
+        feGaussian2.setAttribute('result', 'blurOut');
+        feGaussian2.setAttribute('in', 'offOut');
+        feGaussian2.setAttribute('stdDeviation', '5');
+        const feBlend2 = document.createElementNS(svgNS, 'feBlend');
+        feBlend2.setAttribute('in', 'SourceGraphic');
+        feBlend2.setAttribute('in2', 'blurOut');
+        feBlend2.setAttribute('mode', 'normal');
+        selectedShadow.appendChild(feOffset2);
+        selectedShadow.appendChild(feGaussian2);
+        selectedShadow.appendChild(feBlend2);
+        defs.appendChild(selectedShadow);
+
+        this.svg.appendChild(defs);
+
+        // Main group for transform
+        this.mainGroup = document.createElementNS(svgNS, 'g');
+        this.mainGroup.setAttribute('class', 'flowchart-main-group');
+        this.svg.appendChild(this.mainGroup);
+
+        // Clear existing canvas content and add SVG
+        this.canvas.innerHTML = '';
+        this.canvas.appendChild(this.svg);
+    }
+
+    // ==================== Context Menu ====================
 
     initContextMenu() {
         this.contextMenu = document.createElement('div');
@@ -49,20 +162,20 @@ class MindmapRenderer {
                 <svg viewBox="0 0 24 24" width="16" height="16">
                     <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
                 </svg>
-                <span>从此处创建分支</span>
+                <span>从此处分叉对话</span>
             </div>
-            <div class="context-menu-item" data-action="deleteBranch">
-                <svg viewBox="0 0 24 24" width="16" height="16">
-                    <path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
-                </svg>
-                <span>删除此分支</span>
-            </div>
-            <div class="context-menu-divider"></div>
             <div class="context-menu-item" data-action="viewDetails">
                 <svg viewBox="0 0 24 24" width="16" height="16">
                     <path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
                 </svg>
                 <span>查看详情</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="deleteBranch">
+                <svg viewBox="0 0 24 24" width="16" height="16">
+                    <path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                </svg>
+                <span>删除此分支</span>
             </div>
         `;
         document.body.appendChild(this.contextMenu);
@@ -80,29 +193,18 @@ class MindmapRenderer {
                 this.hideContextMenu();
             }
         });
-
-        document.addEventListener('contextmenu', (e) => {
-            const nodeEl = e.target.closest('.mind-elixir-node');
-            if (nodeEl && this.canvas.contains(nodeEl)) {
-                e.preventDefault();
-                this.showContextMenu(e, nodeEl.dataset.nodeid);
-            }
-        });
     }
 
     showContextMenu(event, nodeId) {
-        if (nodeId === 'root') {
-            return;
-        }
+        if (nodeId === this.rootId) return;
 
         this.contextMenuNodeId = nodeId;
-        const nodeData = this.findNodeData(nodeId);
+        const nodeData = this.nodeDataMap.get(nodeId);
         const deleteItem = this.contextMenu.querySelector('[data-action="deleteBranch"]');
-        
-        if (nodeData && nodeData.isBranch) {
+
+        // Show delete option for non-root nodes
+        if (deleteItem) {
             deleteItem.style.display = 'flex';
-        } else {
-            deleteItem.style.display = 'none';
         }
 
         this.contextMenu.style.left = `${event.pageX}px`;
@@ -116,93 +218,56 @@ class MindmapRenderer {
 
     async handleContextMenuAction(action) {
         this.hideContextMenu();
-        
         if (!this.contextMenuNodeId) return;
-        
+
         const nodeId = this.contextMenuNodeId;
-        const nodeData = this.findNodeData(nodeId);
-        
+
         switch (action) {
             case 'createBranch':
                 await this.handleCreateBranch(nodeId);
                 break;
             case 'deleteBranch':
-                if (nodeData && nodeData.isBranch) {
-                    this.showDeleteBranchConfirm(nodeId, nodeData.branch_name || '未命名分支');
-                }
+                this.showDeleteBranchConfirm(nodeId);
                 break;
             case 'viewDetails':
-                const messageInfo = this.nodeMessages.get(nodeId);
-                if (messageInfo) {
-                    this.showNodeDetail(messageInfo);
+                const nodeData = this.nodeDataMap.get(nodeId);
+                if (nodeData) {
+                    this.showNodeDetail({
+                        nodeId: nodeData.id,
+                        fullContent: nodeData.userMessage || nodeData.aiReply || '',
+                        role: nodeData.userMessage ? 'user' : 'assistant',
+                        userMessage: nodeData.userMessage,
+                        aiReply: nodeData.aiReply
+                    });
                     this.highlightNode(nodeId);
                 }
                 break;
         }
     }
 
-    async handleCreateBranch(parentNodeId) {
-        const branchName = prompt('请输入分支名称:', `分支 ${this.branchColors.size + 1}`);
-        if (branchName === null) return;
-        
-        if (!this.currentSessionId) {
-            alert('请先选择一个会话');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/branches/create', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    session_id: this.currentSessionId,
-                    parent_node_id: parentNodeId,
-                    branch_name: branchName
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('创建分支失败');
-            }
-
-            const branch = await response.json();
-            
-            this.branchColors.set(branch.id, branch.branch_color);
-            
-            this.addBranchNodeToMap(branch, parentNodeId);
-            
-            if (this.onBranchCreated) {
-                this.onBranchCreated(branch);
-            }
-            
-            this.refresh();
-            
-        } catch (error) {
-            console.error('创建分支失败:', error);
-            alert('创建分支失败: ' + error.message);
-        }
-    }
-
-    addBranchNodeToMap(branch, parentNodeId) {
-        const parentNode = this.findNodeData(parentNodeId);
-        if (parentNode) {
-            if (!parentNode.children) {
-                parentNode.children = [];
-            }
-            parentNode.children.push({
-                id: branch.id,
-                topic: branch.branch_name,
-                isBranch: true,
-                branchColor: branch.branch_color,
-                children: []
+    handleCreateBranch(parentNodeId) {
+        // 分叉=选中该节点并聚焦聊天输入框,用户发送消息后自动形成分支
+        this.highlightNode(parentNodeId);
+        this.selectedNodeId = parentNodeId;
+        if (this.onNodeSelect) {
+            const nodeData = this.findNodeData(parentNodeId);
+            this.onNodeSelect({
+                nodeId: parentNodeId,
+                userMessage: nodeData?.userMessage || nodeData?.user_message || '',
+                aiReply: nodeData?.aiReply || nodeData?.ai_reply || '',
+                parentId: nodeData?.parentId || nodeData?.parent_id || null,
+                branchColor: nodeData?.branchColor || nodeData?.branch_color || ''
             });
         }
+        // 聚焦聊天输入框
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) chatInput.focus();
     }
 
-    showDeleteBranchConfirm(branchNodeId, branchName) {
-        const confirmed = confirm(`确定要删除分支 "${branchName}" 吗？\n\n删除分支将同时删除该分支下的所有内容，此操作不可恢复。`);
+    showDeleteBranchConfirm(branchNodeId) {
+        const nodeData = this.nodeDataMap.get(branchNodeId);
+        const name = nodeData ? (nodeData.userMessage || '未命名节点').slice(0, 20) : '未命名分支';
+        const confirmed = confirm(`确定要删除节点 "${name}" 吗？\n\n删除将同时删除该节点下的所有子节点，此操作不可恢复。`);
         if (confirmed) {
             this.handleDeleteBranch(branchNodeId);
         }
@@ -215,33 +280,20 @@ class MindmapRenderer {
         }
 
         try {
-            const response = await fetch('/api/branches/delete', {
+            const response = await fetch(`/api/sessions/${this.currentSessionId}/nodes/${branchNodeId}?cascade=true`, {
                 method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    session_id: this.currentSessionId,
-                    branch_node_id: branchNodeId,
-                    delete_children: true
-                })
+                headers: { 'Content-Type': 'application/json' }
             });
 
-            if (!response.ok) {
-                throw new Error('删除分支失败');
-            }
+            if (!response.ok) throw new Error('删除节点失败');
 
-            this.branchColors.delete(branchNodeId);
-            
             if (this.onBranchDeleted) {
                 this.onBranchDeleted(branchNodeId);
             }
-            
             this.refresh();
-            
         } catch (error) {
-            console.error('删除分支失败:', error);
-            alert('删除分支失败: ' + error.message);
+            console.error('删除节点失败:', error);
+            alert('删除节点失败: ' + error.message);
         }
     }
 
@@ -253,51 +305,7 @@ class MindmapRenderer {
         this.onBranchDeleted = callback;
     }
 
-    initMindElixir() {
-        const options = {
-            el: this.canvas,
-            direction: MindElixir.SIDE,
-            locale: 'zh_CN',
-            draggable: true,
-            editable: false,
-            contextMenu: false,
-            toolBar: false,
-            nodeMenu: false,
-            keypress: false,
-            overflowHidden: false,
-            mainNodeVerticalGap: 30,
-            mainNodeHorizontalGap: 100,
-            subTreeVerticalGap: 15,
-            subTreeHorizontalGap: 80,
-            allowUndo: false,
-            generateNewNodeData: this.generateNewNodeData.bind(this)
-        };
-
-        const initialData = {
-            nodeData: {
-                id: 'root',
-                topic: '开始对话',
-                root: true,
-                children: []
-            }
-        };
-
-        this.mindElixir = new MindElixir(options);
-        this.mindElixir.init(initialData);
-
-        this.mindElixir.bus.addListener('selectNode', this.handleNodeSelect.bind(this));
-        this.mindElixir.bus.addListener('expandNode', this.handleNodeExpand.bind(this));
-
-        this.applyCustomStyles();
-    }
-
-    generateNewNodeData() {
-        return {
-            id: `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            topic: '新节点',
-            children: []
-        };
-    }
+    // ==================== Node Detail Modal ====================
 
     initNodeDetailModal() {
         this.modal = this.container.querySelector('#nodeDetailModal');
@@ -313,29 +321,28 @@ class MindmapRenderer {
         });
     }
 
-    handleNodeSelect(nodeData) {
-        if (nodeData && nodeData.id !== 'root') {
-            const messageInfo = this.nodeMessages.get(nodeData.id);
-            if (messageInfo) {
-                this.showNodeDetail(messageInfo);
-                this.highlightNode(nodeData.id);
-            }
-        }
-    }
-
-    handleNodeExpand(nodeData) {
-        setTimeout(() => {
-            this.applyCustomStyles();
-            this.renderCustomNodeContent();
-        }, 50);
-    }
-
     showNodeDetail(messageInfo) {
-        this.modalRole.textContent = messageInfo.role === 'user' ? '用户消息' : 'AI回复';
-        this.modalRole.className = `node-detail-role ${messageInfo.role}`;
-        this.modalBody.textContent = messageInfo.fullContent;
+        if (messageInfo.userMessage && messageInfo.aiReply) {
+            // Show both user and AI messages
+            this.modalRole.textContent = '对话详情';
+            this.modalRole.className = 'node-detail-role';
+            this.modalBody.innerHTML = `
+                <div style="margin-bottom: 12px;">
+                    <div style="font-size: 12px; font-weight: 600; color: #3b82f6; margin-bottom: 4px;">👤 用户提问</div>
+                    <div style="white-space: pre-wrap; word-wrap: break-word;">${this.escapeHtml(messageInfo.userMessage)}</div>
+                </div>
+                <div style="border-top: 1px solid var(--border-color); padding-top: 12px;">
+                    <div style="font-size: 12px; font-weight: 600; color: #10b981; margin-bottom: 4px;">🤖 AI回复</div>
+                    <div style="white-space: pre-wrap; word-wrap: break-word;">${this.escapeHtml(messageInfo.aiReply)}</div>
+                </div>
+            `;
+        } else {
+            this.modalRole.textContent = messageInfo.role === 'user' ? '用户消息' : 'AI回复';
+            this.modalRole.className = `node-detail-role ${messageInfo.role}`;
+            this.modalBody.textContent = messageInfo.fullContent || '';
+        }
         this.modal.classList.add('active');
-        
+
         if (this.onNodeSelect) {
             this.onNodeSelect(messageInfo);
         }
@@ -346,20 +353,591 @@ class MindmapRenderer {
         this.clearNodeHighlight();
     }
 
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ==================== Pan and Zoom ====================
+
+    initPanAndZoom() {
+        // Mouse wheel zoom
+        this.svg.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(0.3, Math.min(2, this.scale * delta));
+
+            // Zoom towards mouse position
+            const rect = this.svg.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const scaleChange = newScale / this.scale;
+            this.panX = mouseX - scaleChange * (mouseX - this.panX);
+            this.panY = mouseY - scaleChange * (mouseY - this.panY);
+            this.scale = newScale;
+
+            this.applyTransform();
+        });
+
+        // Pan with mouse drag on blank area
+        this.svg.addEventListener('mousedown', (e) => {
+            if (e.button === 0 && !e.target.closest('.flowchart-node-group')) {
+                this.isPanning = true;
+                this.panStartX = e.clientX;
+                this.panStartY = e.clientY;
+                this.panStartPanX = this.panX;
+                this.panStartPanY = this.panY;
+                this.svg.style.cursor = 'grabbing';
+                e.preventDefault();
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (this.isPanning) {
+                this.panX = this.panStartPanX + (e.clientX - this.panStartX);
+                this.panY = this.panStartPanY + (e.clientY - this.panStartY);
+                this.applyTransform();
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (this.isPanning) {
+                this.isPanning = false;
+                this.svg.style.cursor = '';
+            }
+        });
+
+        // Right-click context menu on nodes
+        this.svg.addEventListener('contextmenu', (e) => {
+            const nodeGroup = e.target.closest('.flowchart-node-group');
+            if (nodeGroup) {
+                e.preventDefault();
+                const nodeId = nodeGroup.dataset.nodeid;
+                this.showContextMenu(e, nodeId);
+            }
+        });
+    }
+
+    applyTransform() {
+        this.mainGroup.setAttribute('transform',
+            `translate(${this.panX}, ${this.panY}) scale(${this.scale})`
+        );
+    }
+
+    zoomIn() {
+        this.scale = Math.min(2, this.scale * 1.2);
+        this.applyTransform();
+    }
+
+    zoomOut() {
+        this.scale = Math.max(0.3, this.scale / 1.2);
+        this.applyTransform();
+    }
+
+    resetView() {
+        this.scale = 1;
+        this.centerView();
+    }
+
+    centerView() {
+        if (this.nodePositions.size === 0) {
+            this.panX = 0;
+            this.panY = 0;
+            this.applyTransform();
+            return;
+        }
+
+        const rect = this.svg.getBoundingClientRect();
+        const svgCenterX = rect.width / 2;
+        const svgCenterY = 40;
+
+        // Find the root node position
+        const rootPos = this.nodePositions.get(this.rootId || 'root');
+        if (rootPos) {
+            this.panX = svgCenterX - rootPos.x * this.scale;
+            this.panY = svgCenterY;
+        }
+
+        this.applyTransform();
+    }
+
+    // ==================== Data Conversion ====================
+
+    convertTreeData(treeData) {
+        this.nodeDataMap.clear();
+        this.colorIndex = 0;
+
+        // Handle both old format (treeData.root) and new format (treeData is the root)
+        let root = treeData;
+        if (treeData && treeData.root) {
+            root = treeData.root;
+        }
+
+        if (!root) return null;
+
+        // Determine root node: either id === 'root' or the top-level node
+        this.rootId = root.id;
+        this.processNode(root, 0, null);
+        return root;
+    }
+
+    processNode(node, depth, parentColor) {
+        if (!node) return;
+
+        // Support both backend format (user_message, ai_reply, branch_color)
+        // and app.js converted format (userMessage, aiReply, branchColor)
+        const color = node.branch_color || node.branchColor || parentColor || BRANCH_COLORS[0];
+
+        // Determine node type and content
+        const isRoot = node.id === this.rootId;
+        const userMessage = node.user_message || node.userMessage || node.content || '';
+        const aiReply = node.ai_reply || node.aiReply || '';
+        const branchColor = node.branch_color || node.branchColor || color;
+
+        const processedNode = {
+            id: node.id,
+            parentId: node.parent_id || (isRoot ? null : 'root'),
+            userMessage: userMessage,
+            aiReply: aiReply,
+            branchColor: branchColor,
+            timestamp: node.timestamp || '',
+            isRoot: isRoot,
+            depth: depth,
+            children: []
+        };
+
+        this.nodeDataMap.set(node.id, processedNode);
+
+        if (node.children && node.children.length > 0) {
+            let childColor = branchColor;
+            node.children.forEach((child, index) => {
+                if (index > 0) {
+                    // Branch: assign new color for siblings after the first
+                    childColor = BRANCH_COLORS[this.colorIndex % BRANCH_COLORS.length];
+                    this.colorIndex++;
+                } else {
+                    childColor = child.branch_color || child.branchColor || branchColor;
+                }
+                this.processNode(child, depth + 1, childColor);
+                processedNode.children.push(child.id);
+            });
+        }
+    }
+
+    // ==================== Layout Algorithm ====================
+
+    calculateLayout() {
+        this.nodePositions.clear();
+        const root = this.nodeDataMap.get(this.rootId || 'root');
+        if (!root) return;
+
+        // Calculate subtree widths bottom-up
+        this.calculateSubtreeWidths(root);
+
+        // Layout top-down
+        const startX = 0;
+        const startY = 0;
+        this.layoutNode(root, startX, startY);
+    }
+
+    calculateSubtreeWidths(node) {
+        if (!node.children || node.children.length === 0) {
+            node.subtreeWidth = NODE_WIDTH;
+            return NODE_WIDTH;
+        }
+
+        let totalWidth = 0;
+        node.children.forEach((childId, index) => {
+            const child = this.nodeDataMap.get(childId);
+            if (child) {
+                const childWidth = this.calculateSubtreeWidths(child);
+                totalWidth += childWidth;
+                if (index > 0) {
+                    totalWidth += NODE_GAP;
+                }
+            }
+        });
+
+        node.subtreeWidth = Math.max(NODE_WIDTH, totalWidth);
+        return node.subtreeWidth;
+    }
+
+    layoutNode(node, x, y) {
+        const nodeHeight = this.getNodeHeight(node);
+        this.nodePositions.set(node.id, { x, y, width: NODE_WIDTH, height: nodeHeight });
+
+        if (!node.children || node.children.length === 0) return;
+
+        const totalChildWidth = node.children.reduce((sum, childId, index) => {
+            const child = this.nodeDataMap.get(childId);
+            return sum + (child ? child.subtreeWidth : NODE_WIDTH) + (index > 0 ? NODE_GAP : 0);
+        }, 0);
+
+        let currentX = x - totalChildWidth / 2;
+
+        node.children.forEach((childId, index) => {
+            const child = this.nodeDataMap.get(childId);
+            if (child) {
+                const childX = currentX + child.subtreeWidth / 2;
+                this.layoutNode(child, childX, y + LEVEL_HEIGHT);
+                currentX += child.subtreeWidth + NODE_GAP;
+            }
+        });
+    }
+
+    getNodeHeight(node) {
+        if (node.isRoot) return 50;
+        const hasUser = node.userMessage && node.userMessage.trim();
+        const hasAI = node.aiReply && node.aiReply.trim();
+        if (hasUser && hasAI) return NODE_MAX_HEIGHT;
+        return NODE_MIN_HEIGHT;
+    }
+
+    // ==================== SVG Rendering ====================
+
+    render(treeData) {
+        if (!treeData) {
+            this.renderEmptyState();
+            return;
+        }
+
+        this.currentData = treeData;
+        const root = this.convertTreeData(treeData);
+        if (!root) {
+            this.renderEmptyState();
+            return;
+        }
+
+        this.calculateLayout();
+        this.renderSVG();
+
+        // Center view after render
+        requestAnimationFrame(() => {
+            this.centerView();
+        });
+    }
+
+    renderSVG() {
+        const svgNS = 'http://www.w3.org/2000/svg';
+
+        // Clear main group and dynamic markers
+        this.mainGroup.innerHTML = '';
+        const defs = this.svg.querySelector('defs');
+        // Remove dynamic arrow markers (keep gradients and filters)
+        defs.querySelectorAll('[id^="arrowhead-"]').forEach(m => m.remove());
+
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+        // Render connections first (behind nodes)
+        this.renderConnections(svgNS, isDark);
+
+        // Render nodes
+        this.nodeDataMap.forEach((node, nodeId) => {
+            const pos = this.nodePositions.get(nodeId);
+            if (pos) {
+                this.renderNode(svgNS, node, pos, isDark);
+            }
+        });
+    }
+
+    renderConnections(svgNS, isDark) {
+        const createdMarkers = new Set();
+
+        this.nodeDataMap.forEach((node, nodeId) => {
+            if (!node.children || node.children.length === 0) return;
+
+            const parentPos = this.nodePositions.get(nodeId);
+            if (!parentPos) return;
+
+            node.children.forEach(childId => {
+                const childPos = this.nodePositions.get(childId);
+                const childNode = this.nodeDataMap.get(childId);
+                if (!childPos || !childNode) return;
+
+                const lineColor = childNode.branchColor || '#94a3b8';
+
+                // Create a unique marker for this color if not already created
+                const markerId = `arrowhead-${lineColor.replace('#', '')}`;
+                if (!createdMarkers.has(markerId)) {
+                    this.createArrowMarker(svgNS, markerId, lineColor);
+                    createdMarkers.add(markerId);
+                }
+
+                // Parent bottom center to child top center
+                const x1 = parentPos.x;
+                const y1 = parentPos.y + parentPos.height / 2;
+                const x2 = childPos.x;
+                const y2 = childPos.y - childPos.height / 2;
+
+                // Draw curved path with rounded corners
+                const midY = (y1 + y2) / 2;
+                const radius = 12;
+
+                let pathD;
+                if (Math.abs(x2 - x1) < 1) {
+                    // Straight vertical line
+                    pathD = `M ${x1} ${y1} L ${x2} ${y2}`;
+                } else {
+                    // Curved path with rounded corners
+                    const dir = x2 > x1 ? 1 : -1;
+                    pathD = `M ${x1} ${y1} L ${x1} ${midY - radius} Q ${x1} ${midY} ${x1 + dir * radius} ${midY} L ${x2 - dir * radius} ${midY} Q ${x2} ${midY} ${x2} ${midY + radius} L ${x2} ${y2}`;
+                }
+
+                const path = document.createElementNS(svgNS, 'path');
+                path.setAttribute('d', pathD);
+                path.setAttribute('stroke', lineColor);
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('marker-end', `url(#${markerId})`);
+                path.setAttribute('class', 'flowchart-connection');
+                this.mainGroup.appendChild(path);
+            });
+        });
+    }
+
+    createArrowMarker(svgNS, markerId, color) {
+        const defs = this.svg.querySelector('defs');
+        const marker = document.createElementNS(svgNS, 'marker');
+        marker.setAttribute('id', markerId);
+        marker.setAttribute('markerWidth', '8');
+        marker.setAttribute('markerHeight', '6');
+        marker.setAttribute('refX', '8');
+        marker.setAttribute('refY', '3');
+        marker.setAttribute('orient', 'auto');
+        const markerPath = document.createElementNS(svgNS, 'path');
+        markerPath.setAttribute('d', 'M0,0 L8,3 L0,6 Z');
+        markerPath.setAttribute('fill', color);
+        marker.appendChild(markerPath);
+        defs.appendChild(marker);
+    }
+
+    renderNode(svgNS, node, pos, isDark) {
+        const group = document.createElementNS(svgNS, 'g');
+        group.setAttribute('class', 'flowchart-node-group');
+        group.setAttribute('data-nodeid', node.id);
+        group.style.cursor = 'pointer';
+
+        const x = pos.x - pos.width / 2;
+        const y = pos.y - pos.height / 2;
+
+        if (node.isRoot) {
+            this.renderRootNode(svgNS, group, node, x, y, pos, isDark);
+        } else {
+            this.renderDialogueNode(svgNS, group, node, x, y, pos, isDark);
+        }
+
+        // Add selection highlight
+        if (this.selectedNodeId === node.id) {
+            group.classList.add('selected');
+        }
+
+        // Event listeners
+        group.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.handleNodeClick(node);
+        });
+
+        group.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            this.handleNodeDoubleClick(node);
+        });
+
+        this.mainGroup.appendChild(group);
+    }
+
+    renderRootNode(svgNS, group, node, x, y, pos, isDark) {
+        const rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', x);
+        rect.setAttribute('y', y);
+        rect.setAttribute('width', pos.width);
+        rect.setAttribute('height', pos.height);
+        rect.setAttribute('rx', ROOT_RADIUS);
+        rect.setAttribute('ry', ROOT_RADIUS);
+        rect.setAttribute('fill', 'url(#rootGradient)');
+        rect.setAttribute('filter', 'url(#nodeShadow)');
+        rect.setAttribute('class', 'flowchart-root-rect');
+        group.appendChild(rect);
+
+        const text = document.createElementNS(svgNS, 'text');
+        text.setAttribute('x', pos.x);
+        text.setAttribute('y', pos.y + 5);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'middle');
+        text.setAttribute('fill', '#ffffff');
+        text.setAttribute('font-size', '16');
+        text.setAttribute('font-weight', '600');
+        text.setAttribute('font-family', 'var(--font-family)');
+
+        // Display session title or default text
+        const displayText = node.userMessage || '开始对话';
+        text.textContent = this.truncateText(displayText, 14);
+        group.appendChild(text);
+    }
+
+    renderDialogueNode(svgNS, group, node, x, y, pos, isDark) {
+        const bgColor = isDark ? '#1e293b' : '#ffffff';
+        const textColor = isDark ? '#f1f5f9' : '#1e293b';
+        const borderColor = isDark ? '#334155' : '#e2e8f0';
+        const branchColor = node.branchColor || '#6366f1';
+
+        // Main rect with left border accent
+        const rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', x);
+        rect.setAttribute('y', y);
+        rect.setAttribute('width', pos.width);
+        rect.setAttribute('height', pos.height);
+        rect.setAttribute('rx', NODE_RADIUS);
+        rect.setAttribute('ry', NODE_RADIUS);
+        rect.setAttribute('fill', bgColor);
+        rect.setAttribute('stroke', borderColor);
+        rect.setAttribute('stroke-width', '1');
+        rect.setAttribute('filter', 'url(#nodeShadow)');
+        rect.setAttribute('class', 'flowchart-dialogue-rect');
+        group.appendChild(rect);
+
+        // Left accent border
+        const accentRect = document.createElementNS(svgNS, 'rect');
+        accentRect.setAttribute('x', x);
+        accentRect.setAttribute('y', y + NODE_RADIUS);
+        accentRect.setAttribute('width', '4');
+        accentRect.setAttribute('height', pos.height - NODE_RADIUS * 2);
+        accentRect.setAttribute('rx', '2');
+        accentRect.setAttribute('fill', branchColor);
+        group.appendChild(accentRect);
+
+        const padding = 14;
+        const innerX = x + padding + 4;
+        const innerWidth = pos.width - padding * 2 - 4;
+        let currentY = y + padding;
+
+        // User message line
+        const hasUser = node.userMessage && node.userMessage.trim();
+        const hasAI = node.aiReply && node.aiReply.trim();
+
+        if (hasUser) {
+            // User icon + text
+            const userIcon = document.createElementNS(svgNS, 'text');
+            userIcon.setAttribute('x', innerX);
+            userIcon.setAttribute('y', currentY + 4);
+            userIcon.setAttribute('font-size', '11');
+            userIcon.setAttribute('fill', '#3b82f6');
+            userIcon.setAttribute('font-weight', '600');
+            userIcon.textContent = '👤';
+            group.appendChild(userIcon);
+
+            const userText = document.createElementNS(svgNS, 'text');
+            userText.setAttribute('x', innerX + 16);
+            userText.setAttribute('y', currentY + 4);
+            userText.setAttribute('font-size', '12');
+            userText.setAttribute('fill', isDark ? '#93c5fd' : '#1e40af');
+            userText.setAttribute('font-weight', '500');
+            userText.setAttribute('font-family', 'var(--font-family)');
+            userText.textContent = this.truncateText(node.userMessage, 22);
+            group.appendChild(userText);
+
+            currentY += 20;
+        }
+
+        if (hasAI) {
+            // AI icon + text
+            const aiIcon = document.createElementNS(svgNS, 'text');
+            aiIcon.setAttribute('x', innerX);
+            aiIcon.setAttribute('y', currentY + 4);
+            aiIcon.setAttribute('font-size', '11');
+            aiIcon.setAttribute('fill', '#10b981');
+            aiIcon.setAttribute('font-weight', '600');
+            aiIcon.textContent = '🤖';
+            group.appendChild(aiIcon);
+
+            const aiText = document.createElementNS(svgNS, 'text');
+            aiText.setAttribute('x', innerX + 16);
+            aiText.setAttribute('y', currentY + 4);
+            aiText.setAttribute('font-size', '12');
+            aiText.setAttribute('fill', isDark ? '#6ee7b7' : '#065f46');
+            aiText.setAttribute('font-weight', '500');
+            aiText.setAttribute('font-family', 'var(--font-family)');
+            aiText.textContent = this.truncateText(node.aiReply, 30);
+            group.appendChild(aiText);
+        }
+
+        // If neither user nor AI message, show placeholder
+        if (!hasUser && !hasAI) {
+            const placeholder = document.createElementNS(svgNS, 'text');
+            placeholder.setAttribute('x', pos.x);
+            placeholder.setAttribute('y', pos.y + 4);
+            placeholder.setAttribute('text-anchor', 'middle');
+            placeholder.setAttribute('dominant-baseline', 'middle');
+            placeholder.setAttribute('font-size', '12');
+            placeholder.setAttribute('fill', isDark ? '#64748b' : '#94a3b8');
+            placeholder.setAttribute('font-family', 'var(--font-family)');
+            placeholder.textContent = '空节点';
+            group.appendChild(placeholder);
+        }
+    }
+
+    // ==================== Node Interactions ====================
+
+    handleNodeClick(node) {
+        this.highlightNode(node.id);
+
+        if (this.onNodeSelect) {
+            this.onNodeSelect({
+                nodeId: node.id,
+                userMessage: node.userMessage,
+                aiReply: node.aiReply,
+                parentId: node.parentId,
+                branchColor: node.branchColor
+            });
+        }
+    }
+
+    handleNodeDoubleClick(node) {
+        this.showNodeDetail({
+            nodeId: node.id,
+            userMessage: node.userMessage,
+            aiReply: node.aiReply,
+            fullContent: node.userMessage || node.aiReply || '',
+            role: node.userMessage ? 'user' : 'assistant'
+        });
+        this.highlightNode(node.id);
+    }
+
     highlightNode(nodeId) {
         this.clearNodeHighlight();
         this.selectedNodeId = nodeId;
-        const nodeEl = this.canvas.querySelector(`[data-nodeid="${nodeId}"]`);
-        if (nodeEl) {
-            nodeEl.classList.add('selected');
+
+        const group = this.svg.querySelector(`[data-nodeid="${nodeId}"]`);
+        if (group) {
+            group.classList.add('selected');
+            const mainRect = group.querySelector('.flowchart-dialogue-rect, .flowchart-root-rect');
+            if (mainRect) {
+                mainRect.setAttribute('filter', 'url(#selectedShadow)');
+                const node = this.nodeDataMap.get(nodeId);
+                if (node && !node.isRoot) {
+                    mainRect.setAttribute('stroke', node.branchColor || '#6366f1');
+                    mainRect.setAttribute('stroke-width', '2.5');
+                }
+            }
         }
     }
 
     clearNodeHighlight() {
         if (this.selectedNodeId) {
-            const nodeEl = this.canvas.querySelector(`[data-nodeid="${this.selectedNodeId}"]`);
-            if (nodeEl) {
-                nodeEl.classList.remove('selected');
+            const group = this.svg.querySelector(`[data-nodeid="${this.selectedNodeId}"]`);
+            if (group) {
+                group.classList.remove('selected');
+                const mainRect = group.querySelector('.flowchart-dialogue-rect, .flowchart-root-rect');
+                if (mainRect) {
+                    mainRect.setAttribute('filter', 'url(#nodeShadow)');
+                    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                    const node = this.nodeDataMap.get(this.selectedNodeId);
+                    if (node && !node.isRoot) {
+                        mainRect.setAttribute('stroke', isDark ? '#334155' : '#e2e8f0');
+                        mainRect.setAttribute('stroke-width', '1');
+                    }
+                }
             }
             this.selectedNodeId = null;
         }
@@ -369,360 +947,7 @@ class MindmapRenderer {
         this.onNodeSelect = callback;
     }
 
-    render(mindmapData) {
-        if (!mindmapData || !mindmapData.root) {
-            this.renderEmptyState();
-            return;
-        }
-
-        this.currentData = mindmapData;
-        this.nodeMessages.clear();
-        this.colorIndex = 0;
-
-        const elixirData = this.convertToElixirFormat(mindmapData.root);
-        
-        this.mindElixir.nodeData = elixirData;
-        this.mindElixir.linkData = this.generateLinkData(elixirData);
-        
-        this.mindElixir.render();
-
-        setTimeout(() => {
-            this.applyCustomStyles();
-            this.renderCustomNodeContent();
-            this.mindElixir.center();
-        }, 100);
-    }
-
-    convertToElixirFormat(node, depth = 0, parentColor = null) {
-        const color = depth === 0 ? BRANCH_COLORS[0] : 
-                      depth === 1 ? this.getNextColor() : parentColor;
-
-        const isUserNode = node.role === 'user';
-        const isAssistantNode = node.role === 'assistant';
-        const isBranchNode = node.isBranch === true;
-        
-        let displayTopic = this.truncateText(node.content || node.topic || node.branch_name || '', 25);
-        
-        if (isBranchNode) {
-            displayTopic = node.branch_name || node.topic || '分支';
-            if (node.branchColor) {
-                this.branchColors.set(node.id, node.branchColor);
-            }
-        }
-        
-        const elixirNode = {
-            id: node.id,
-            topic: displayTopic,
-            root: depth === 0,
-            style: this.getNodeStyle(depth, color, node.role, node),
-            children: [],
-            expanded: true,
-            isBranch: isBranchNode,
-            branchColor: node.branchColor || color,
-            branchName: node.branch_name
-        };
-
-        if ((node.fullContent || node.role) && !isBranchNode) {
-            this.nodeMessages.set(node.id, {
-                fullContent: node.fullContent || node.content,
-                role: node.role || 'assistant',
-                summary: this.truncateText(node.content || '', 25),
-                timestamp: node.timestamp || Date.now()
-            });
-        }
-
-        if (node.children && node.children.length > 0) {
-            elixirNode.children = node.children.map(child => 
-                this.convertToElixirFormat(child, depth + 1, color)
-            );
-        }
-
-        return elixirNode;
-    }
-
-    getNextColor() {
-        const color = BRANCH_COLORS[this.colorIndex % BRANCH_COLORS.length];
-        this.colorIndex++;
-        return color;
-    }
-
-    getNodeStyle(depth, color, role = null, nodeData = null) {
-        if (depth === 0) {
-            return {
-                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                color: '#ffffff',
-                fontSize: '16px',
-                padding: '14px 24px',
-                borderRadius: '16px',
-                fontWeight: '600'
-            };
-        }
-
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        
-        if (nodeData && nodeData.isBranch) {
-            const branchColor = nodeData.branchColor || color;
-            return {
-                background: isDark ? '#1e293b' : '#ffffff',
-                color: isDark ? '#f1f5f9' : '#1e293b',
-                fontSize: '14px',
-                padding: '12px 18px',
-                borderRadius: '12px',
-                borderLeft: `5px solid ${branchColor}`,
-                boxShadow: `0 2px 8px ${branchColor}33`,
-                fontWeight: '600'
-            };
-        }
-        
-        if (role === 'user') {
-            return {
-                background: isDark ? '#1e3a5f' : '#e0f2fe',
-                color: isDark ? '#93c5fd' : '#1e40af',
-                fontSize: depth === 1 ? '14px' : '13px',
-                padding: depth === 1 ? '12px 18px' : '10px 14px',
-                borderRadius: '12px',
-                borderLeft: `4px solid ${USER_COLOR}`,
-                boxShadow: '0 2px 8px rgba(59, 130, 246, 0.15)'
-            };
-        }
-        
-        if (role === 'assistant') {
-            return {
-                background: isDark ? '#134e4a' : '#d1fae5',
-                color: isDark ? '#6ee7b7' : '#065f46',
-                fontSize: depth === 1 ? '14px' : '13px',
-                padding: depth === 1 ? '12px 18px' : '10px 14px',
-                borderRadius: '12px',
-                borderLeft: `4px solid ${ASSISTANT_COLOR}`,
-                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.15)'
-            };
-        }
-        
-        return {
-            background: isDark ? '#1e293b' : '#ffffff',
-            color: isDark ? '#f1f5f9' : '#1e293b',
-            fontSize: depth === 1 ? '14px' : '13px',
-            padding: depth === 1 ? '10px 16px' : '8px 12px',
-            borderRadius: '8px',
-            borderLeft: `4px solid ${color}`,
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
-        };
-    }
-
-    generateLinkData(nodeData) {
-        const links = [];
-        
-        const traverse = (node) => {
-            if (node.children && node.children.length > 0) {
-                node.children.forEach(child => {
-                    links.push({
-                        from: node.id,
-                        to: child.id
-                    });
-                    traverse(child);
-                });
-            }
-        };
-        
-        traverse(nodeData);
-        return links;
-    }
-
-    applyCustomStyles() {
-        const nodes = this.canvas.querySelectorAll('.mind-elixir-node');
-        
-        nodes.forEach(node => {
-            const nodeId = node.dataset.nodeid;
-            const nodeData = this.findNodeData(nodeId);
-            const messageInfo = this.nodeMessages.get(nodeId);
-            
-            if (nodeData) {
-                this.styleNode(node, nodeData, messageInfo);
-                this.attachNodeEvents(node, nodeId);
-            }
-        });
-    }
-
-    renderCustomNodeContent() {
-        const nodes = this.canvas.querySelectorAll('.mind-elixir-node');
-        
-        nodes.forEach(nodeEl => {
-            const nodeId = nodeEl.dataset.nodeid;
-            const messageInfo = this.nodeMessages.get(nodeId);
-            const nodeData = this.findNodeData(nodeId);
-            
-            if (!messageInfo || nodeData?.root) return;
-            
-            const topicEl = nodeEl.querySelector('.mind-elixir-topic');
-            if (!topicEl) return;
-            
-            const existingContent = topicEl.querySelector('.node-custom-content');
-            if (existingContent) return;
-            
-            topicEl.innerHTML = '';
-            
-            const contentWrapper = document.createElement('div');
-            contentWrapper.className = 'node-custom-content';
-            
-            const header = document.createElement('div');
-            header.className = 'node-header';
-            
-            const roleIcon = document.createElement('span');
-            roleIcon.className = `node-role-icon ${messageInfo.role}`;
-            roleIcon.innerHTML = messageInfo.role === 'user' 
-                ? '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>'
-                : '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>';
-            
-            const roleLabel = document.createElement('span');
-            roleLabel.className = 'node-role-label';
-            roleLabel.textContent = messageInfo.role === 'user' ? '用户' : 'AI';
-            
-            header.appendChild(roleIcon);
-            header.appendChild(roleLabel);
-            
-            const summary = document.createElement('div');
-            summary.className = 'node-summary';
-            summary.textContent = messageInfo.summary;
-            
-            contentWrapper.appendChild(header);
-            contentWrapper.appendChild(summary);
-            
-            topicEl.appendChild(contentWrapper);
-        });
-    }
-
-    findNodeData(nodeId) {
-        if (!this.mindElixir.nodeData) return null;
-        
-        const traverse = (node) => {
-            if (node.id === nodeId) return node;
-            if (node.children) {
-                for (const child of node.children) {
-                    const found = traverse(child);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-        
-        return traverse(this.mindElixir.nodeData);
-    }
-
-    styleNode(nodeElement, nodeData, messageInfo) {
-        const isRoot = nodeData.root;
-        const depth = this.getNodeDepth(nodeData.id);
-        const isBranch = nodeData.isBranch;
-        
-        nodeElement.classList.add('custom-node');
-        if (isRoot) {
-            nodeElement.classList.add('root-node');
-        } else if (isBranch) {
-            nodeElement.classList.add('branch-node');
-            if (nodeData.branchColor) {
-                nodeElement.style.setProperty('--branch-color', nodeData.branchColor);
-            }
-        } else if (messageInfo?.role === 'user') {
-            nodeElement.classList.add('user-node');
-        } else if (messageInfo?.role === 'assistant') {
-            nodeElement.classList.add('assistant-node');
-        } else if (depth === 1) {
-            nodeElement.classList.add('branch-node');
-        } else {
-            nodeElement.classList.add('sub-node');
-        }
-
-        const topicEl = nodeElement.querySelector('.mind-elixir-topic');
-        if (topicEl) {
-            topicEl.classList.add('node-topic');
-        }
-    }
-
-    getNodeDepth(nodeId) {
-        if (!this.mindElixir.nodeData) return 0;
-        
-        const traverse = (node, depth) => {
-            if (node.id === nodeId) return depth;
-            if (node.children) {
-                for (const child of node.children) {
-                    const found = traverse(child, depth + 1);
-                    if (found !== -1) return found;
-                }
-            }
-            return -1;
-        };
-        
-        return traverse(this.mindElixir.nodeData, 0);
-    }
-
-    attachNodeEvents(nodeElement, nodeId) {
-        const expander = nodeElement.querySelector('.mind-elixir-expander');
-        
-        if (expander) {
-            expander.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.toggleNodeExpand(nodeId);
-            });
-        }
-
-        nodeElement.addEventListener('click', (e) => {
-            if (e.target.closest('.mind-elixir-expander')) return;
-            e.stopPropagation();
-            
-            const messageInfo = this.nodeMessages.get(nodeId);
-            if (messageInfo) {
-                this.showNodeDetail(messageInfo);
-                this.highlightNode(nodeId);
-            }
-        });
-
-        nodeElement.addEventListener('mouseenter', () => {
-            if (!nodeElement.classList.contains('selected')) {
-                nodeElement.style.transform = 'translateY(-2px)';
-                nodeElement.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-            }
-        });
-
-        nodeElement.addEventListener('mouseleave', () => {
-            if (!nodeElement.classList.contains('selected')) {
-                nodeElement.style.transform = '';
-                nodeElement.style.boxShadow = '';
-            }
-        });
-    }
-
-    toggleNodeExpand(nodeId) {
-        const nodeData = this.findNodeData(nodeId);
-        if (nodeData && nodeData.children && nodeData.children.length > 0) {
-            nodeData.expanded = !nodeData.expanded;
-            this.mindElixir.render();
-            setTimeout(() => {
-                this.applyCustomStyles();
-                this.renderCustomNodeContent();
-            }, 50);
-        }
-    }
-
-    renderEmptyState() {
-        this.nodeMessages.clear();
-        
-        const emptyData = {
-            nodeData: {
-                id: 'root',
-                topic: '开始对话',
-                root: true,
-                children: []
-            }
-        };
-
-        this.mindElixir.nodeData = emptyData.nodeData;
-        this.mindElixir.linkData = [];
-        this.mindElixir.render();
-
-        setTimeout(() => {
-            this.applyCustomStyles();
-            this.renderCustomNodeContent();
-        }, 100);
-    }
+    // ==================== Utility ====================
 
     truncateText(text, maxLength) {
         if (!text) return '';
@@ -730,25 +955,28 @@ class MindmapRenderer {
         return text.slice(0, maxLength) + '...';
     }
 
-    zoomIn() {
-        if (this.mindElixir) {
-            this.mindElixir.scale = Math.min(2, this.mindElixir.scale * 1.2);
-            this.mindElixir.render();
-        }
-    }
+    renderEmptyState() {
+        this.nodeDataMap.clear();
+        this.nodePositions.clear();
+        this.rootId = 'root';
 
-    zoomOut() {
-        if (this.mindElixir) {
-            this.mindElixir.scale = Math.max(0.3, this.mindElixir.scale / 1.2);
-            this.mindElixir.render();
-        }
-    }
+        // Create a simple root node
+        const emptyRoot = {
+            id: 'root',
+            parentId: null,
+            userMessage: '开始对话',
+            aiReply: '',
+            branchColor: '#6366f1',
+            isRoot: true,
+            depth: 0,
+            children: [],
+            subtreeWidth: NODE_WIDTH
+        };
+        this.nodeDataMap.set('root', emptyRoot);
+        this.nodePositions.set('root', { x: 0, y: 0, width: NODE_WIDTH, height: 50 });
 
-    resetView() {
-        if (this.mindElixir) {
-            this.mindElixir.scale = 1;
-            this.mindElixir.center();
-        }
+        this.renderSVG();
+        requestAnimationFrame(() => this.centerView());
     }
 
     refresh() {
@@ -757,94 +985,59 @@ class MindmapRenderer {
         }
     }
 
-    exportToJSON() {
-        if (!this.mindElixir || !this.mindElixir.nodeData) {
-            return JSON.stringify({}, null, 2);
-        }
+    clear() {
+        this.nodeDataMap.clear();
+        this.nodePositions.clear();
+        this.renderEmptyState();
+    }
 
+    // ==================== Export ====================
+
+    exportToJSON() {
         const data = {
-            mindmap: this.mindElixir.nodeData,
-            messages: Object.fromEntries(this.nodeMessages)
+            nodes: Array.from(this.nodeDataMap.entries()).map(([id, node]) => ({
+                id: node.id,
+                parentId: node.parentId,
+                userMessage: node.userMessage,
+                aiReply: node.aiReply,
+                branchColor: node.branchColor,
+                timestamp: node.timestamp
+            }))
         };
-        
         return JSON.stringify(data, null, 2);
     }
 
     exportToMarkdown(session) {
         let markdown = `# ${session?.title || '思维导图'}\n\n`;
-        
-        const traverseNode = (node, depth = 0) => {
+
+        const traverseNode = (nodeId, depth = 0) => {
+            const node = this.nodeDataMap.get(nodeId);
+            if (!node) return;
+
             const indent = '  '.repeat(depth);
-            const messageInfo = this.nodeMessages.get(node.id);
-            const prefix = messageInfo?.role === 'user' ? '👤 ' : 
-                          messageInfo?.role === 'assistant' ? '🤖 ' : '';
-            markdown += `${indent}- ${prefix}${node.topic || node.content}\n`;
+            if (node.isRoot) {
+                markdown += `${indent}- ${node.userMessage || '开始对话'}\n`;
+            } else {
+                if (node.userMessage) {
+                    markdown += `${indent}- 👤 ${node.userMessage}\n`;
+                }
+                if (node.aiReply) {
+                    markdown += `${indent}  - 🤖 ${this.truncateText(node.aiReply, 50)}\n`;
+                }
+            }
+
             if (node.children) {
-                node.children.forEach(child => traverseNode(child, depth + 1));
+                node.children.forEach(childId => traverseNode(childId, depth + 1));
             }
         };
-        
-        if (this.mindElixir && this.mindElixir.nodeData) {
-            traverseNode(this.mindElixir.nodeData);
-        }
-        
+
+        traverseNode(this.rootId || 'root');
         return markdown;
     }
 
-    exportToPNG() {
-        return new Promise((resolve, reject) => {
-            if (!this.canvas) {
-                reject(new Error('画布不存在'));
-                return;
-            }
-            
-            const svgElement = this.canvas.querySelector('svg');
-            if (!svgElement) {
-                reject(new Error('SVG元素不存在'));
-                return;
-            }
-
-            try {
-                const svgData = new XMLSerializer().serializeToString(svgElement);
-                const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-                const url = URL.createObjectURL(svgBlob);
-                
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width * 2;
-                    canvas.height = img.height * 2;
-                    const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
-                    canvas.toBlob((blob) => {
-                        URL.revokeObjectURL(url);
-                        resolve(blob);
-                    }, 'image/png');
-                };
-                img.onerror = () => {
-                    URL.revokeObjectURL(url);
-                    reject(new Error('图片加载失败'));
-                };
-                img.src = url;
-            } catch (error) {
-                reject(error);
-            }
-        });
-    }
-
-    clear() {
-        this.nodeMessages.clear();
-        this.renderEmptyState();
-    }
-
     destroy() {
-        if (this.mindElixir) {
-            this.mindElixir = null;
-        }
-        this.nodeMessages.clear();
+        this.nodeDataMap.clear();
+        this.nodePositions.clear();
     }
 }
 
