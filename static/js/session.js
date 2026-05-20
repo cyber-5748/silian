@@ -118,6 +118,7 @@ class SessionManager {
         return {
             id: backendSession.id,
             title: backendSession.name || backendSession.title || '未命名会话',
+            pinned: backendSession.pinned || false,
             createdAt: backendSession.created_at,
             updatedAt: backendSession.updated_at,
             messages: backendSession.messages || [],
@@ -291,9 +292,62 @@ class SessionManager {
             }
             this.saveToStorage();
             this.notifyListeners();
+
+            if (!sessionId.startsWith('session_')) {
+                import('./api.js').then(apiModule => {
+                    apiModule.default.deleteSession(sessionId).catch(e => {
+                        console.warn('后端删除会话失败:', e);
+                    });
+                });
+            }
+
             return true;
         }
         return false;
+    }
+
+    async togglePin(sessionId) {
+        const session = this.getSession(sessionId);
+        if (!session) return false;
+
+        try {
+            const apiModule = await import('./api.js');
+            const api = apiModule.default;
+            const result = await api.pinSession(sessionId);
+            session.pinned = result.pinned;
+            this.saveToStorage();
+            this.notifyListeners();
+            return result.pinned;
+        } catch (e) {
+            console.warn('后端置顶操作失败:', e);
+            session.pinned = !session.pinned;
+            this.saveToStorage();
+            this.notifyListeners();
+            return session.pinned;
+        }
+    }
+
+    async renameSession(sessionId, newName) {
+        const session = this.getSession(sessionId);
+        if (!session) return false;
+
+        const oldName = session.title;
+        session.title = newName;
+        this.saveToStorage();
+        this.notifyListeners();
+
+        try {
+            const apiModule = await import('./api.js');
+            const api = apiModule.default;
+            await api.renameSession(sessionId, newName);
+        } catch (e) {
+            console.warn('后端重命名失败:', e);
+            session.title = oldName;
+            this.saveToStorage();
+            this.notifyListeners();
+        }
+
+        return true;
     }
 
     clearAllSessions() {

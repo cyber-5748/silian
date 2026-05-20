@@ -64,16 +64,26 @@ def backup_sessions(backup_name: Optional[str] = None) -> str:
 def get_session_list() -> list:
     data = read_sessions()
     sessions = data.get("sessions", [])
-    return [
+    result = [
         {
             "id": s["id"],
-            "name": s["name"],
+            "name": s.get("name", "未命名会话"),
+            "pinned": s.get("pinned", False),
             "created_at": s["created_at"],
             "updated_at": s["updated_at"],
             "node_count": len(s.get("nodes", []))
         }
         for s in sessions
     ]
+    result.sort(key=lambda s: (not s["pinned"], -new_parse_time(s["updated_at"])))
+    return result
+
+
+def new_parse_time(t: str) -> float:
+    try:
+        return datetime.fromisoformat(t).timestamp()
+    except Exception:
+        return 0.0
 
 
 def get_session(session_id: str) -> Optional[dict]:
@@ -99,6 +109,7 @@ def create_session(name: str = "新会话") -> dict:
     new_session = {
         "id": str(uuid4()),
         "name": name,
+        "pinned": False,
         "created_at": now,
         "updated_at": now,
         "nodes": [root_node]

@@ -41,6 +41,7 @@ class UpdateSessionRequest(BaseModel):
     mindmap: Optional[dict] = None
     nodes: Optional[list] = None
     conversation_tree: Optional[dict] = None
+    pinned: Optional[bool] = None
 
 
 class AutosaveRequest(BaseModel):
@@ -246,6 +247,8 @@ async def update_session_api(session_id: str, request: UpdateSessionRequest):
         updates["nodes"] = request.nodes
     if request.conversation_tree is not None:
         updates["conversation_tree"] = request.conversation_tree
+    if request.pinned is not None:
+        updates["pinned"] = request.pinned
 
     if not updates:
         return session
@@ -263,6 +266,35 @@ async def delete_session_api(session_id: str):
         raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
     logger.info("删除会话: id=%s", session_id)
     return {"success": True, "message": "会话已删除"}
+
+
+@router.put("/{session_id}/pin")
+async def toggle_pin_session(session_id: str):
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
+    current_pinned = session.get("pinned", False)
+    new_pinned = not current_pinned
+    result = storage_update_session(session_id, {"pinned": new_pinned})
+    if not result:
+        raise HTTPException(status_code=500, detail="更新置顶状态失败")
+    action = "置顶" if new_pinned else "取消置顶"
+    logger.info("会话%s: id=%s", action, session_id)
+    return {"success": True, "pinned": new_pinned, "message": f"已{action}"}
+
+
+@router.put("/{session_id}/rename")
+async def rename_session_api(session_id: str, name: str = ""):
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="会话名称不能为空")
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"会话不存在: {session_id}")
+    result = storage_update_session(session_id, {"name": name.strip()})
+    if not result:
+        raise HTTPException(status_code=500, detail="重命名失败")
+    logger.info("重命名会话: id=%s, name=%s", session_id, name.strip())
+    return {"success": True, "name": name.strip(), "message": "重命名成功"}
 
 
 @router.post("/{session_id}/autosave")

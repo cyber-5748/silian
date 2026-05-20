@@ -1037,3 +1037,115 @@ body {
 .confirm-dialog-actions .btn-danger:hover {
     background-color: #dc2626;
 }
+
+.session-context-menu {
+    position: fixed;
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-xs);
+    z-index: 1100;
+    min-width: 160px;
+    display: none;
+    animation: contextMenuFadeIn 150ms ease;
+}
+
+.session-context-menu.visible {
+    display: block;
+}
+
+.session-context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    transition: background-color var(--transition-fast);
+}
+
+.session-context-menu-item:hover {
+    background-color: var(--background-color);
+}
+
+.session-context-menu-item svg {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+.session-context-menu-item:hover svg {
+    color: var(--primary-color);
+}
+
+.session-context-menu-item.danger {
+    color: #ef4444;
+}
+
+.session-context-menu-item.danger:hover {
+    background-color: #fef2f2;
+}
+
+[data-theme="dark"] .session-context-menu-item.danger:hover {
+    background-color: #450a0a;
+}
+
+.session-context-menu-item.danger svg {
+    color: #ef4444;
+}
+
+.session-context-menu-divider {
+    height: 1px;
+    background-color: var(--border-color);
+    margin: var(--spacing-xs) 0;
+}
+
+.session-group-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: var(--spacing-sm) var(--spacing-md) var(--spacing-xs);
+    margin-top: var(--spacing-xs);
+}
+
+.session-group-label:first-child {
+    margin-top: 0;
+}
+
+.session-pin-icon {
+    display: flex;
+    align-items: center;
+    color: var(--primary-color);
+    flex-shrink: 0;
+    margin-right: 2px;
+}
+
+.session-item.pinned {
+    background-color: rgba(99, 102, 241, 0.04);
+}
+
+.session-item.pinned.active {
+    background-color: var(--primary-color);
+}
+
+.session-item.pinned.active .session-pin-icon {
+    color: white;
+}
+
+.session-rename-input {
+    flex: 1;
+    padding: 2px 6px;
+    border: 1px solid var(--primary-color);
+    border-radius: var(--radius-sm);
+    background-color: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-family: var(--font-family);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    min-width: 0;
+}

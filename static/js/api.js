@@ -214,6 +214,18 @@ class APIModule {
         });
     }
 
+    async pinSession(sessionId) {
+        return this.request(`/sessions/${sessionId}/pin`, {
+            method: 'PUT'
+        });
+    }
+
+    async renameSession(sessionId, name) {
+        return this.request(`/sessions/${sessionId}/rename?name=${encodeURIComponent(name)}`, {
+            method: 'PUT'
+        });
+    }
+
     async getMindmap(sessionId) {
         return this.request(`/sessions/${sessionId}/mindmap`);
     }

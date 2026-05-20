@@ -10,6 +10,7 @@ class App {
         this.currentSession = null;
         this.activeNodeId = 'root';
         this.nodeConversationMap = new Map();
+        this.sessionContextMenu = null;
     }
 
     init() {
@@ -17,6 +18,7 @@ class App {
         this.initMindmap();
         this.initChat();
         this.initSessionUI();
+        this.initSessionContextMenu();
         this.initToolbar();
         this.initExportModal();
 
@@ -266,29 +268,224 @@ class App {
         const sessionList = document.getElementById('sessionList');
         sessionList.innerHTML = '';
 
-        sessions.forEach(session => {
-            const item = document.createElement('div');
-            item.classList.add('session-item');
-            if (session.id === currentSessionId) {
-                item.classList.add('active');
+        const pinnedSessions = sessions.filter(s => s.pinned);
+        const unpinnedSessions = sessions.filter(s => !s.pinned);
+
+        const renderGroup = (groupSessions, label) => {
+            if (groupSessions.length === 0) return;
+            if (label) {
+                const groupLabel = document.createElement('div');
+                groupLabel.classList.add('session-group-label');
+                groupLabel.textContent = label;
+                sessionList.appendChild(groupLabel);
             }
+            groupSessions.forEach(session => {
+                const item = document.createElement('div');
+                item.classList.add('session-item');
+                if (session.id === currentSessionId) {
+                    item.classList.add('active');
+                }
+                if (session.pinned) {
+                    item.classList.add('pinned');
+                }
+                item.dataset.sessionId = session.id;
 
-            const title = document.createElement('span');
-            title.classList.add('session-item-title');
-            title.textContent = session.title || session.name || '未命名会话';
+                if (session.pinned) {
+                    const pinIcon = document.createElement('span');
+                    pinIcon.classList.add('session-pin-icon');
+                    pinIcon.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>';
+                    item.appendChild(pinIcon);
+                }
 
-            const date = document.createElement('span');
-            date.classList.add('session-item-date');
-            date.textContent = this.formatDate(session.updatedAt || session.updated_at);
+                const title = document.createElement('span');
+                title.classList.add('session-item-title');
+                title.textContent = session.title || session.name || '未命名会话';
 
-            item.appendChild(title);
-            item.appendChild(date);
+                const date = document.createElement('span');
+                date.classList.add('session-item-date');
+                date.textContent = this.formatDate(session.updatedAt || session.updated_at);
 
-            item.addEventListener('click', () => {
-                sessionManager.switchSession(session.id);
+                item.appendChild(title);
+                item.appendChild(date);
+
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    sessionManager.switchSession(session.id);
+                });
+
+                item.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.showSessionContextMenu(e, session);
+                });
+
+                sessionList.appendChild(item);
             });
+        };
 
-            sessionList.appendChild(item);
+        renderGroup(pinnedSessions, pinnedSessions.length > 0 && unpinnedSessions.length > 0 ? '置顶' : null);
+        renderGroup(unpinnedSessions, pinnedSessions.length > 0 ? '其他会话' : null);
+    }
+
+    initSessionContextMenu() {
+        this.sessionContextMenu = document.createElement('div');
+        this.sessionContextMenu.classList.add('session-context-menu');
+        document.body.appendChild(this.sessionContextMenu);
+
+        document.addEventListener('click', () => {
+            this.hideSessionContextMenu();
+        });
+
+        document.addEventListener('contextmenu', (e) => {
+            if (!e.target.closest('.session-item')) {
+                this.hideSessionContextMenu();
+            }
+        });
+    }
+
+    showSessionContextMenu(event, session) {
+        const menu = this.sessionContextMenu;
+        const isPinned = session.pinned;
+
+        menu.innerHTML = '';
+
+        const pinItem = document.createElement('div');
+        pinItem.classList.add('session-context-menu-item');
+        pinItem.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+            <span>${isPinned ? '取消置顶' : '置顶'}</span>
+        `;
+        pinItem.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            this.hideSessionContextMenu();
+            await sessionManager.togglePin(session.id);
+        });
+        menu.appendChild(pinItem);
+
+        const renameItem = document.createElement('div');
+        renameItem.classList.add('session-context-menu-item');
+        renameItem.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span>重命名</span>
+        `;
+        renameItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.hideSessionContextMenu();
+            this.startRenameSession(session);
+        });
+        menu.appendChild(renameItem);
+
+        const divider = document.createElement('div');
+        divider.classList.add('session-context-menu-divider');
+        menu.appendChild(divider);
+
+        const deleteItem = document.createElement('div');
+        deleteItem.classList.add('session-context-menu-item', 'danger');
+        deleteItem.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            <span>删除</span>
+        `;
+        deleteItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.hideSessionContextMenu();
+            this.confirmDeleteSession(session);
+        });
+        menu.appendChild(deleteItem);
+
+        const x = event.clientX;
+        const y = event.clientY;
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.classList.add('visible');
+
+        requestAnimationFrame(() => {
+            const rect = menu.getBoundingClientRect();
+            if (rect.right > window.innerWidth) {
+                menu.style.left = (x - rect.width) + 'px';
+            }
+            if (rect.bottom > window.innerHeight) {
+                menu.style.top = (y - rect.height) + 'px';
+            }
+        });
+    }
+
+    hideSessionContextMenu() {
+        if (this.sessionContextMenu) {
+            this.sessionContextMenu.classList.remove('visible');
+        }
+    }
+
+    startRenameSession(session) {
+        const sessionList = document.getElementById('sessionList');
+        const item = sessionList.querySelector(`[data-session-id="${session.id}"]`);
+        if (!item) return;
+
+        const titleEl = item.querySelector('.session-item-title');
+        const originalTitle = session.title || session.name || '未命名会话';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.classList.add('session-rename-input');
+        input.value = originalTitle;
+
+        titleEl.replaceWith(input);
+        input.focus();
+        input.select();
+
+        const finishRename = async () => {
+            const newName = input.value.trim();
+            if (newName && newName !== originalTitle) {
+                await sessionManager.renameSession(session.id, newName);
+            } else {
+                const newTitleEl = document.createElement('span');
+                newTitleEl.classList.add('session-item-title');
+                newTitleEl.textContent = originalTitle;
+                input.replaceWith(newTitleEl);
+            }
+        };
+
+        input.addEventListener('blur', finishRename);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                input.blur();
+            } else if (e.key === 'Escape') {
+                input.value = originalTitle;
+                input.blur();
+            }
+        });
+    }
+
+    confirmDeleteSession(session) {
+        const title = session.title || session.name || '未命名会话';
+        const overlay = document.createElement('div');
+        overlay.classList.add('confirm-dialog');
+        overlay.innerHTML = `
+            <div class="confirm-dialog-content">
+                <div class="confirm-dialog-title">删除会话</div>
+                <div class="confirm-dialog-message">确定要删除「${title}」吗？此操作不可恢复。</div>
+                <div class="confirm-dialog-actions">
+                    <button class="btn-secondary cancel-btn">取消</button>
+                    <button class="btn-primary btn-danger delete-btn">删除</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('.cancel-btn').addEventListener('click', () => {
+            overlay.remove();
+        });
+
+        overlay.querySelector('.delete-btn').addEventListener('click', () => {
+            sessionManager.deleteSession(session.id);
+            overlay.remove();
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.remove();
+            }
         });
     }
 
