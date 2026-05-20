@@ -567,6 +567,8 @@ class App {
                         ? (node.user_message.length > 30 ? node.user_message.slice(0, 30) + '...' : node.user_message)
                         : '根节点'),
                 fullContent: node.ai_reply || node.user_message || '',
+                userMessage: node.user_message || '',
+                aiReply: node.ai_reply || '',
                 role: node.ai_reply ? 'assistant' : (node.user_message ? 'user' : null),
                 timestamp: node.timestamp,
                 children: []
