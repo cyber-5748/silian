@@ -32,25 +32,45 @@ class SessionManager {
             const backendData = await api.getSessions();
             const backendSessions = backendData.sessions || [];
 
-            if (backendSessions.length === 0 && this.sessions.length > 0) {
-                for (const session of this.sessions) {
+            // 用后端会话作为基础
+            const backendMap = new Map(backendSessions.map(s => [s.id, s]));
+            const result = [];
+
+            // 1. 加入所有后端会话
+            for (const bs of backendSessions) {
+                const localSession = this.sessions.find(s => s.id === bs.id);
+                if (localSession) {
+                    const backendTime = new Date(bs.updated_at || 0).getTime();
+                    const localTime = new Date(localSession.updatedAt || 0).getTime();
+                    result.push(backendTime >= localTime ? this.mapBackendSession(bs) : localSession);
+                } else {
+                    result.push(this.mapBackendSession(bs));
+                }
+            }
+
+            // 2. 处理本地独有的会话(包括 session_xxx ID的)
+            const backendIds = new Set(backendSessions.map(s => s.id));
+            for (const localSession of this.sessions) {
+                if (!backendIds.has(localSession.id)) {
+                    // 本地会话不在后端,需要同步
                     try {
-                        const backendSession = await api.createSession(session.title || '新会话');
+                        const backendSession = await api.createSession(localSession.title || '新会话');
                         if (backendSession && backendSession.id) {
-                            const oldId = session.id;
+                            const oldId = localSession.id;
                             const newId = backendSession.id;
-                            session.id = newId;
-                            session.createdAt = backendSession.created_at || session.createdAt;
-                            session.updatedAt = backendSession.updated_at || session.updatedAt;
+                            localSession.id = newId;
+                            localSession.createdAt = backendSession.created_at || localSession.createdAt;
+                            localSession.updatedAt = backendSession.updated_at || localSession.updatedAt;
                             if (this.currentSessionId === oldId) {
                                 this.currentSessionId = newId;
                             }
-                            if (session.messages && session.messages.length > 0) {
+                            // 同步消息和思维导图数据
+                            if (localSession.messages && localSession.messages.length > 0) {
                                 try {
                                     await api.updateSession(newId, {
-                                        title: session.title,
-                                        messages: session.messages,
-                                        mindmap: session.mindmap,
+                                        title: localSession.title,
+                                        messages: localSession.messages,
+                                        mindmap: localSession.mindmap,
                                     });
                                 } catch (e) {
                                     console.warn('同步会话数据到后端失败:', e);
@@ -58,16 +78,16 @@ class SessionManager {
                             }
                         }
                     } catch (e) {
-                        console.warn('同步会话到后端失败:', e);
+                        console.warn('同步本地会话到后端失败:', e);
                     }
+                    result.push(localSession);
                 }
-                this.saveToStorage();
-            } else if (backendSessions.length > 0) {
-                const merged = this.mergeSessions(backendSessions, this.sessions);
-                this.sessions = merged;
-                this.saveToStorage();
             }
 
+            this.sessions = result;
+            this.saveToStorage();
+
+            // 3. 加载当前会话的完整数据
             if (this.currentSessionId) {
                 const currentSession = this.getCurrentSession();
                 if (currentSession && !currentSession.id.startsWith('session_')) {

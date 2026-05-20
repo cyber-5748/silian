@@ -267,7 +267,7 @@ class App {
     handleSessionChange({ sessions, currentSessionId, currentSession }) {
         this.renderSessionList(sessions, currentSessionId);
 
-        if (currentSession && currentSession.id !== this.currentSession?.id) {
+        if (currentSession) {
             this.loadSession(currentSession);
         }
     }
@@ -310,28 +310,32 @@ class App {
     }
 
     loadSession(session) {
+        const sessionChanged = !this.currentSession || this.currentSession.id !== session.id;
         this.currentSession = session;
 
         if (session.id) {
             this.mindmapRenderer.setSessionId(session.id);
+            this.chatModule.setSessionId(session.id);
         }
 
-        if (session.messages && session.messages.length > 0) {
-            this.chatModule.loadMessages(session.messages);
-        } else {
-            this.chatModule.clear();
-        }
+        if (sessionChanged) {
+            if (session.messages && session.messages.length > 0) {
+                this.chatModule.loadMessages(session.messages);
+            } else {
+                this.chatModule.clear();
+            }
 
-        if (session.mindmap) {
-            this.mindmapRenderer.render(session.mindmap);
-        } else {
-            this.mindmapRenderer.render({
-                root: {
-                    id: 'root',
-                    content: session.title || session.name || '对话主题',
-                    children: []
-                }
-            });
+            if (session.mindmap) {
+                this.mindmapRenderer.render(session.mindmap);
+            } else {
+                this.mindmapRenderer.render({
+                    root: {
+                        id: 'root',
+                        content: session.title || session.name || '对话主题',
+                        children: []
+                    }
+                });
+            }
         }
     }
 
