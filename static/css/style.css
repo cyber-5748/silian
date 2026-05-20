@@ -964,22 +964,6 @@ body {
     border-radius: 5px 0 0 5px;
 }
 
-#createBranchBtn {
-    position: relative;
-}
-
-#createBranchBtn::after {
-    content: '';
-    position: absolute;
-    bottom: 2px;
-    right: 2px;
-    width: 6px;
-    height: 6px;
-    background-color: #10b981;
-    border-radius: 50%;
-    border: 1px solid var(--surface-color);
-}
-
 .confirm-dialog {
     position: fixed;
     top: 0;

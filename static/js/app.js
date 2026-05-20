@@ -110,31 +110,11 @@ class App {
         const zoomInBtn = document.getElementById('zoomInBtn');
         const zoomOutBtn = document.getElementById('zoomOutBtn');
         const resetViewBtn = document.getElementById('resetViewBtn');
-        const createBranchBtn = document.getElementById('createBranchBtn');
 
         themeToggleBtn.addEventListener('click', () => this.toggleTheme());
         zoomInBtn.addEventListener('click', () => this.mindmapRenderer.zoomIn());
         zoomOutBtn.addEventListener('click', () => this.mindmapRenderer.zoomOut());
         resetViewBtn.addEventListener('click', () => this.mindmapRenderer.resetView());
-
-        if (createBranchBtn) {
-            createBranchBtn.addEventListener('click', () => this.handleCreateBranchFromToolbar());
-        }
-    }
-
-    handleCreateBranchFromToolbar() {
-        const session = sessionManager.getCurrentSession();
-        if (!session) {
-            alert('请先选择一个会话');
-            return;
-        }
-
-        const selectedNodeId = this.mindmapRenderer.selectedNodeId;
-        if (selectedNodeId && selectedNodeId !== 'root') {
-            this.mindmapRenderer.handleCreateBranch(selectedNodeId);
-        } else {
-            this.mindmapRenderer.handleCreateBranch('root');
-        }
     }
 
     initExportModal() {
